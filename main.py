@@ -1,13 +1,11 @@
-import os
 import logging
 import requests
 import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
-
 from flask import Flask
-from threading import Thread
+import threading
 
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
@@ -18,23 +16,10 @@ from telegram.ext import (
     filters,
 )
 
-# 🔐 TOKEN
-TOKEN = os.getenv("TOKEN")
+# 🔐 TOKEN (BU YERGA O'ZINGNIKINI YOZ)
+TOKEN = "8750583800:AAGWDecP47uPEfcYIrZamE45aHpJsxF2RUA"
 
 logging.basicConfig(level=logging.INFO)
-
-# 🌐 FLASK (Render uchun kerak)
-app_web = Flask("")
-
-
-@app_web.route("/")
-def home():
-    return "Bot ishlayapti 🚀"
-
-
-def run_web():
-    app_web.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
-
 
 # 🌍 SHAHARLAR
 CITIES = {
@@ -44,7 +29,7 @@ CITIES = {
     "Andijon": (40.7821, 72.3442),
 }
 
-
+# 🌤 OB-HAVO OLISH
 def get_weather(city):
     if city not in CITIES:
         return None
@@ -67,7 +52,7 @@ def get_weather(city):
         logging.error(e)
         return None
 
-
+# 📊 GRAFIK
 def create_graph(temps, user_id):
     hours = list(range(24))
 
@@ -83,7 +68,6 @@ def create_graph(temps, user_id):
 
     return path
 
-
 # 🚀 START
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -97,7 +81,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "👋 Salom!\nViloyatni tanlang:",
         reply_markup=markup,
     )
-
 
 # 📍 CITY
 async def handle_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -115,24 +98,30 @@ async def handle_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with open(file_path, "rb") as photo:
         await update.message.reply_photo(
             photo=photo,
-            caption=f"📍 {city} ob-havo",
+            caption=f"📍 {city}\n🌤 24 soatlik harorat",
         )
 
-
-# ▶️ MAIN
-def main():
-    # Telegram bot
+# 🤖 BOTNI ISHLATISH
+def run_bot():
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_city))
 
-    # Web server (Render uchun)
-    Thread(target=run_web).start()
-
     print("Bot ishga tushdi 🚀")
     app.run_polling()
 
+# 🌐 FLASK (Render uchun)
+flask_app = Flask(__name__)
 
+@flask_app.route("/")
+def home():
+    return "Bot ishlayapti!"
+
+def run_flask():
+    flask_app.run(host="0.0.0.0", port=10000)
+
+# ▶️ MAIN
 if __name__ == "__main__":
-    main()
+    threading.Thread(target=run_bot).start()
+    run_flask()
