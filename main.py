@@ -1,11 +1,10 @@
+import os
 import logging
 import requests
-import sqlite3
 import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
-from datetime import time
 
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
@@ -16,36 +15,43 @@ from telegram.ext import (
     filters,
 )
 
-# 🔐 OLD TOKEN (o‘zingnikini qo‘y)
-TOKEN = "8750583800:AAGWDecP47uPEfcYIrZamE45aHpJsxF2RUA"
+# 🔐 TOKEN
+TOKEN = os.getenv("TOKEN")
 
 logging.basicConfig(level=logging.INFO)
 
-# 📦 DATABASE
-conn = sqlite3.connect("users.db", check_same_thread=False)
-cursor = conn.cursor()
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    city TEXT
-)
-""")
-conn.commit()
+# 🌍 SHAHARLAR
+CITIES = {
+    "Toshkent": (41.2995, 69.2401),
+    "Samarqand": (39.6547, 66.9750),
+    "Buxoro": (39.7747, 64.4286),
+    "Andijon": (40.7821, 72.3442),
+}
 
 
-# 🌤 OB-HAVO
+# 🌤 OB-HAVO OLISH
 def get_weather(city):
+    if city not in CITIES:
+        return None
+
+    lat, lon = CITIES[city]
+
     url = "https://api.open-meteo.com/v1/forecast"
+
     params = {
-        "latitude": 41,
-        "longitude": 69,
+        "latitude": lat,
+        "longitude": lon,
         "hourly": "temperature_2m",
+        "timezone": "auto",
     }
 
-    data = requests.get(url, params=params).json()
-
-    return data["hourly"]["temperature_2m"][:24]
+    try:
+        data = requests.get(url, timeout=10).json()
+        return data["hourly"]["temperature_2m"][:24]
+    except Exception as e:
+        logging.error(e)
+        return None
 
 
 # 📊 GRAFIK
@@ -58,11 +64,11 @@ def create_graph(temps, user_id):
     plt.xlabel("Soat")
     plt.ylabel("°C")
 
-    file_name = f"graph_{user_id}.png"
-    plt.savefig(file_name)
+    path = f"/tmp/weather_{user_id}.png"
+    plt.savefig(path)
     plt.close()
 
-    return file_name
+    return path
 
 
 # 🚀 START
@@ -75,7 +81,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
     await update.message.reply_text(
-        "Salom 👋\nViloyatingizni tanlang:",
+        "👋 Salom!\nViloyatni tanlang:",
         reply_markup=markup,
     )
 
@@ -85,40 +91,19 @@ async def handle_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
     city = update.message.text
     user_id = update.message.from_user.id
 
-    cursor.execute(
-        "INSERT OR REPLACE INTO users (user_id, city) VALUES (?, ?)",
-        (user_id, city),
-    )
-    conn.commit()
-
     temps = get_weather(city)
+
+    if not temps:
+        await update.message.reply_text("❌ Ob-havo topilmadi")
+        return
+
     file_path = create_graph(temps, user_id)
 
     with open(file_path, "rb") as photo:
         await update.message.reply_photo(
             photo=photo,
-            caption=f"📍 {city}\n📊 24 soatlik harorat",
+            caption=f"📍 {city}\n🌤 24 soatlik harorat",
         )
-
-
-# 📦 USERS
-def get_all_users():
-    cursor.execute("SELECT user_id FROM users")
-    return cursor.fetchall()
-
-
-# ⏰ DAILY
-async def send_daily(context: ContextTypes.DEFAULT_TYPE):
-    users = get_all_users()
-
-    for (user_id,) in users:
-        try:
-            await context.bot.send_message(
-                chat_id=user_id,
-                text="🌅 Bugungi ob-havo yangilandi!",
-            )
-        except Exception as e:
-            logging.error(e)
 
 
 # ▶️ MAIN
@@ -128,10 +113,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_city))
 
-    # ⏰ 08:00
-    app.job_queue.run_daily(send_daily, time=time(8, 0))
-
-    print("Bot ishladi 🚀")
+    print("Bot ishga tushdi 🚀")
     app.run_polling()
 
 
