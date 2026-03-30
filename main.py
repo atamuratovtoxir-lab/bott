@@ -1,8 +1,12 @@
 import logging
 import requests
 import sqlite3
+import matplotlib
+matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
-from datetime import datetime
+from datetime import time
+
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -12,11 +16,12 @@ from telegram.ext import (
     filters,
 )
 
+# 🔐 OLD TOKEN (o‘zingnikini qo‘y)
 TOKEN = "8750583800:AAGWDecP47uPEfcYIrZamE45aHpJsxF2RUA"
 
 logging.basicConfig(level=logging.INFO)
 
-# 📦 DATABASE (userlarni saqlash)
+# 📦 DATABASE
 conn = sqlite3.connect("users.db", check_same_thread=False)
 cursor = conn.cursor()
 
@@ -29,17 +34,21 @@ CREATE TABLE IF NOT EXISTS users (
 conn.commit()
 
 
-# 🌤 Ob-havo API
+# 🌤 OB-HAVO
 def get_weather(city):
-    url = f"https://api.open-meteo.com/v1/forecast?latitude=41&longitude=69&hourly=temperature_2m,precipitation_probability"
-    data = requests.get(url).json()
+    url = "https://api.open-meteo.com/v1/forecast"
+    params = {
+        "latitude": 41,
+        "longitude": 69,
+        "hourly": "temperature_2m",
+    }
 
-    temps = data["hourly"]["temperature_2m"][:24]
+    data = requests.get(url, params=params).json()
 
-    return temps
+    return data["hourly"]["temperature_2m"][:24]
 
 
-# 📊 GRAFIK CHIZISH
+# 📊 GRAFIK
 def create_graph(temps, user_id):
     hours = list(range(24))
 
@@ -58,26 +67,24 @@ def create_graph(temps, user_id):
 
 # 🚀 START
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.message.from_user
-    user_id = user.id
+    keyboard = [
+        ["Toshkent", "Samarqand"],
+        ["Buxoro", "Andijon"],
+    ]
 
-    keyboard = [["Toshkent", "Samarqand"], ["Buxoro", "Andijon"]]
     markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
     await update.message.reply_text(
-        f"Salom {user.first_name} 👋\n"
-        "Men ob-havoni yuboraman.\n\n"
-        "Viloyatingizni tanlang 👇",
+        "Salom 👋\nViloyatingizni tanlang:",
         reply_markup=markup,
     )
 
 
-# 📍 Viloyat tanlash
+# 📍 CITY
 async def handle_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
     city = update.message.text
     user_id = update.message.from_user.id
 
-    # 💾 user saqlash
     cursor.execute(
         "INSERT OR REPLACE INTO users (user_id, city) VALUES (?, ?)",
         (user_id, city),
@@ -85,45 +92,46 @@ async def handle_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.commit()
 
     temps = get_weather(city)
-
-    # 📊 grafik yaratish
     file_path = create_graph(temps, user_id)
 
-    # matn
-    text = f"📍 {city}\n📊 24 soatlik harorat tayyor!"
+    with open(file_path, "rb") as photo:
+        await update.message.reply_photo(
+            photo=photo,
+            caption=f"📍 {city}\n📊 24 soatlik harorat",
+        )
 
-    await update.message.reply_photo(photo=open(file_path, "rb"), caption=text)
 
-
-# 📦 USERLARNI O‘QISH
+# 📦 USERS
 def get_all_users():
     cursor.execute("SELECT user_id FROM users")
     return cursor.fetchall()
 
 
-# ⏰ umumiy xabar
+# ⏰ DAILY
 async def send_daily(context: ContextTypes.DEFAULT_TYPE):
     users = get_all_users()
 
     for (user_id,) in users:
-        await context.bot.send_message(
-            chat_id=user_id,
-            text="🌅 Bugungi ob-havo yangilandi!",
-        )
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text="🌅 Bugungi ob-havo yangilandi!",
+            )
+        except Exception as e:
+            logging.error(e)
 
 
+# ▶️ MAIN
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_city))
 
-    job = app.job_queue
+    # ⏰ 08:00
+    app.job_queue.run_daily(send_daily, time=time(8, 0))
 
-    # ⏰ har kuni
-    job.run_daily(send_daily, time=datetime.strptime("08:00", "%H:%M").time())
-
-    print("Bot ishga tushdi 🚀")
+    print("Bot ishladi 🚀")
     app.run_polling()
 
 
