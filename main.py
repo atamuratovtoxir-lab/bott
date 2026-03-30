@@ -6,6 +6,9 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 
+from flask import Flask
+from threading import Thread
+
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -20,6 +23,18 @@ TOKEN = os.getenv("TOKEN")
 
 logging.basicConfig(level=logging.INFO)
 
+# 🌐 FLASK (Render uchun kerak)
+app_web = Flask("")
+
+
+@app_web.route("/")
+def home():
+    return "Bot ishlayapti 🚀"
+
+
+def run_web():
+    app_web.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
 
 # 🌍 SHAHARLAR
 CITIES = {
@@ -30,7 +45,6 @@ CITIES = {
 }
 
 
-# 🌤 OB-HAVO OLISH
 def get_weather(city):
     if city not in CITIES:
         return None
@@ -54,7 +68,6 @@ def get_weather(city):
         return None
 
 
-# 📊 GRAFIK
 def create_graph(temps, user_id):
     hours = list(range(24))
 
@@ -102,16 +115,20 @@ async def handle_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with open(file_path, "rb") as photo:
         await update.message.reply_photo(
             photo=photo,
-            caption=f"📍 {city}\n🌤 24 soatlik harorat",
+            caption=f"📍 {city} ob-havo",
         )
 
 
 # ▶️ MAIN
 def main():
+    # Telegram bot
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_city))
+
+    # Web server (Render uchun)
+    Thread(target=run_web).start()
 
     print("Bot ishga tushdi 🚀")
     app.run_polling()
