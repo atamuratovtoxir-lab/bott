@@ -16,7 +16,7 @@ from telegram.ext import (
     filters,
 )
 
-# 🔐 TOKEN (BU YERGA O'ZINGNIKINI YOZ)
+# 🔐 TOKEN
 TOKEN = "8750583800:AAGWDecP47uPEfcYIrZamE45aHpJsxF2RUA"
 
 logging.basicConfig(level=logging.INFO)
@@ -29,7 +29,7 @@ CITIES = {
     "Andijon": (40.7821, 72.3442),
 }
 
-# 🌤 OB-HAVO OLISH
+# 🌤 OB-HAVO
 def get_weather(city):
     if city not in CITIES:
         return None
@@ -37,7 +37,6 @@ def get_weather(city):
     lat, lon = CITIES[city]
 
     url = "https://api.open-meteo.com/v1/forecast"
-
     params = {
         "latitude": lat,
         "longitude": lon,
@@ -101,7 +100,7 @@ async def handle_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
             caption=f"📍 {city}\n🌤 24 soatlik harorat",
         )
 
-# 🤖 BOTNI ISHLATISH
+# 🤖 BOT
 def run_bot():
     app = ApplicationBuilder().token(TOKEN).build()
 
@@ -111,17 +110,14 @@ def run_bot():
     print("Bot ishga tushdi 🚀")
     app.run_polling()
 
-# 🌐 FLASK (Render uchun)
+# 🌐 FLASK (bitta!)
 flask_app = Flask(__name__)
 
 @flask_app.route("/")
 def home():
     return "Bot ishlayapti!"
 
-def run_flask():
-    flask_app.run(host="0.0.0.0", port=10000)
-
 # ▶️ MAIN
 if __name__ == "__main__":
     threading.Thread(target=run_bot).start()
-    run_flask()
+    flask_app.run(host="0.0.0.0", port=10000)
