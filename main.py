@@ -6,15 +6,15 @@ import os
 
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-TOKEN = "8750583800:AAGWDecP47uPEfcYIrZamE45aHpJsxF2RUA"
+TOKEN = "8750583800:AAESA_ESsTR3iX3yJIgt_AzeRASSe1L441Q"
 
 user_city = {}
-user_state = {}
-scheduler = AsyncIOScheduler()
+target_user_id = None
 
-# 📍 REGIONLAR
+# 📍 O‘ZBEKISTON SHAHARLARI
 regions = {
     "Toshkent viloyati": ["Toshkent", "Chirchiq", "Angren", "Olmaliq", "Bekobod"],
     "Samarqand viloyati": ["Samarqand", "Urgut", "Ishtixon", "Kattaqo‘rg‘on"],
@@ -26,19 +26,32 @@ regions = {
     "Qashqadaryo viloyati": ["Qarshi", "Shahrisabz", "Kitob"],
     "Surxondaryo viloyati": ["Termiz", "Denov", "Boysun"],
     "Xorazm viloyati": ["Urganch", "Xiva", "Xonqa"],
-    "Jizzax viloyati": ["Jizzax", "Zomin", "G‘allaorol"],
+    "Jizzax": ["Jizzax", "Zomin", "G‘allaorol"],
     "Qoraqalpog‘iston": ["Nukus", "Taxiatosh", "Chimboy"]
 }
 
-# 🌍 GEO API
+UZBEK_CITIES = []
+for v in regions.values():
+    UZBEK_CITIES.extend(v)
+
+BUTTONS = {
+    "🌤 Hozirgi ob-havo",
+    "📊 24 soat",
+    "📅 5 kunlik",
+    "⚙️ Sozlamalar",
+    "📍 Joy tanlash",
+    "🔙 Orqaga"
+}
+
+# 🌍 GEO
 async def get_coords(city):
-    url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1&language=en&format=json"
+    url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1&language=uz&format=json"
 
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as resp:
             data = await resp.json()
 
-    if "results" in data and data["results"]:
+    if data.get("results"):
         return data["results"][0]["latitude"], data["results"][0]["longitude"]
 
     return None, None
@@ -50,11 +63,21 @@ async def get_weather(city):
     if not lat:
         return None
 
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&hourly=temperature_2m,precipitation_probability&daily=temperature_2m_max,temperature_2m_min&timezone=Asia/Tashkent"
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&hourly=temperature_2m,weathercode&daily=temperature_2m_max,temperature_2m_min&timezone=Asia/Tashkent"
 
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as resp:
             return await resp.json()
+
+# 🌧 YOMG‘IR TEKSHIRISH
+def check_rain(data):
+    codes = data["hourly"]["weathercode"]
+
+    for code in codes[:24]:
+        if 51 <= code <= 99:
+            return True
+
+    return False
 
 # 📊 GRAPH
 async def send_graph(update: Update, context):
@@ -62,24 +85,20 @@ async def send_graph(update: Update, context):
     city = user_city.get(user_id)
 
     if not city:
-        return await update.message.reply_text("❗ Avval joy tanlang")
+        return await update.message.reply_text("❗ Avval shahar tanlang")
 
     data = await get_weather(city)
-
-    if not data:
-        return await update.message.reply_text("❌ Shahar topilmadi")
 
     dates = data["daily"]["time"]
     max_t = data["daily"]["temperature_2m_max"]
     min_t = data["daily"]["temperature_2m_min"]
 
-    plt.figure(figsize=(8,5))
-    plt.plot(dates, max_t, label="Max")
-    plt.plot(dates, min_t, label="Min")
+    plt.figure()
+    plt.plot(dates, max_t)
+    plt.plot(dates, min_t)
 
     plt.title(city)
     plt.xticks(rotation=45)
-    plt.legend()
     plt.tight_layout()
 
     file = "graph.png"
@@ -91,27 +110,11 @@ async def send_graph(update: Update, context):
 
     os.remove(file)
 
-# 🌧 ALERT
-async def rain_alert(app):
-    for user_id, city in user_city.items():
-        data = await get_weather(city)
-
-        if not data:
-            continue
-
-        rain = data["hourly"]["precipitation_probability"][:24]
-        times = data["hourly"]["time"][:24]
-
-        for i in range(24):
-            if rain[i] >= 60:
-                await app.bot.send_message(
-                    user_id,
-                    f"🌧 Yomg‘ir!\n{city} {times[i][11:16]} - {rain[i]}%"
-                )
-                break
-
 # 📌 START
 async def start(update: Update, context):
+    global target_user_id
+    target_user_id = update.effective_user.id
+
     keyboard = [
         ["🌤 Hozirgi ob-havo"],
         ["📊 24 soat"],
@@ -120,7 +123,7 @@ async def start(update: Update, context):
     ]
 
     await update.message.reply_text(
-        "👋 Salom!\nIstalgan shahar yozing 🌍\nMasalan: Toshkent",
+        "👋 Salom!\nO‘zbekiston shahrini yozing 🌍",
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
 
@@ -151,34 +154,16 @@ async def handle(update: Update, context):
     text = update.message.text
     user_id = update.effective_user.id
 
-    state = user_state.get(user_id, "main")
-
-    # 🔙 ORQAGA
     if text == "🔙 Orqaga":
-        user_state[user_id] = "main"
-
-        keyboard = [
-            ["🌤 Hozirgi ob-havo"],
-            ["📊 24 soat"],
-            ["📅 5 kunlik"],
-            ["⚙️ Sozlamalar"]
-        ]
-
-        return await update.message.reply_text(
-            "🏠 Bosh menyu",
-            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-        )
+        return await start(update, context)
 
     if text == "⚙️ Sozlamalar":
         return await settings(update, context)
 
     if text == "📍 Joy tanlash":
-        user_state[user_id] = "region"
         return await choose_region(update)
 
     if text in regions:
-        user_state[user_id] = "city"
-
         keyboard = [[c] for c in regions[text]]
         keyboard.append(["🔙 Orqaga"])
 
@@ -187,31 +172,77 @@ async def handle(update: Update, context):
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         )
 
+    if text == "🌤 Hozirgi ob-havo":
+        city = user_city.get(user_id)
+
+        if not city:
+            return await update.message.reply_text("❗ Avval shahar tanlang")
+
+        data = await get_weather(city)
+        cw = data["current_weather"]
+
+        return await update.message.reply_text(
+            f"{city}\n🌡 {cw['temperature']}°C\n🌬 {cw['windspeed']}"
+        )
+
+    if text == "📊 24 soat":
+        city = user_city.get(user_id)
+
+        if not city:
+            return await update.message.reply_text("❗ Avval shahar tanlang")
+
+        data = await get_weather(city)
+
+        msg = f"📊 {city}:\n\n"
+
+        for i in range(24):
+            msg += f"{data['hourly']['time'][i][11:16]} - {data['hourly']['temperature_2m'][i]}°C\n"
+
+        return await update.message.reply_text(msg)
+
+    if text == "📅 5 kunlik":
+        return await send_graph(update, context)
+
     # 🌍 SHAHAR SAQLASH
-    user_city[user_id] = text
-    user_state[user_id] = "main"
+    if text in UZBEK_CITIES:
+        user_city[user_id] = text
 
-    keyboard = [
-        ["🌤 Hozirgi ob-havo"],
-        ["📊 24 soat"],
-        ["📅 5 kunlik"],
-        ["⚙️ Sozlamalar"]
-    ]
+        return await update.message.reply_text(f"✅ {text} saqlandi")
 
-    return await update.message.reply_text(
-        f"✅ {text} saqlandi",
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    )
+    if text not in BUTTONS:
+        return await update.message.reply_text("❌ Faqat O‘zbekiston shaharlari!")
+
+# 🌅 08:00 + 🌧 CHECK
+async def morning_job(context):
+    for user_id, city in user_city.items():
+        try:
+            data = await get_weather(city)
+            cw = data["current_weather"]
+
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"🌅 Ertalab\n\n{city}\n🌡 {cw['temperature']}°C"
+            )
+
+            if check_rain(data):
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=f"🌧 DIQQAT!\n{city} da yomg‘ir kutilmoqda!"
+                )
+
+        except:
+            pass
 
 # 🚀 MAIN
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(morning_job, "cron", hour=8, minute=0, args=[app])
+    scheduler.start()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT, handle))
-
-    scheduler.add_job(lambda: app.create_task(rain_alert(app)), "interval", hours=3)
-    scheduler.start()
 
     print("Bot ishladi...")
     app.run_polling()
