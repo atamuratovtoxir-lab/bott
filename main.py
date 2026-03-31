@@ -1,6 +1,6 @@
-import requests
+import aiohttp
 import matplotlib
-matplotlib.use('Agg')  # 🔥 MUHIM (Render uchun)
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import os
 
@@ -67,14 +67,17 @@ city_coords = {
     "Chimboy": (42.9500, 59.0667)
 }
 
-def get_weather(city):
+# 🔥 ASYNC API
+async def get_weather(city):
     lat, lon = city_coords.get(city, (41, 69))
     url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,precipitation_probability,wind_speed_10m&timezone=Asia/Tashkent"
 
     try:
-        r = requests.get(url, timeout=10)
-        r.raise_for_status()
-        return r.json()
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    return None
+                return await resp.json()
     except:
         return None
 
@@ -87,7 +90,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-    print(f"Keldi: {repr(text)}")  # 🔥 DEBUG
+    print(f"Keldi: {repr(text)}")
     user_id = update.effective_user.id
 
     daily_users.add(user_id)
@@ -120,7 +123,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❗ Avval shahar tanlang")
             return
 
-        data = get_weather(city)
+        data = await get_weather(city)
         if not data:
             await update.message.reply_text("❗ Ob-havo olinmadi")
             return
@@ -132,11 +135,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif text == "📊 24 soatlik":
         city = user_city.get(user_id)
-        if not city:
-            await update.message.reply_text("❗ Avval shahar tanlang")
-            return
+        data = await get_weather(city)
 
-        data = get_weather(city)
         if not data:
             await update.message.reply_text("❗ Ob-havo olinmadi")
             return
@@ -146,18 +146,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         temps = data["hourly"]["temperature_2m"]
 
         for i in range(8, 24):
-            time = hours[i][11:16]
-            msg += f"{time} - {temps[i]}°C\n"
+            msg += f"{hours[i][11:16]} - {temps[i]}°C\n"
 
         await update.message.reply_text(msg)
 
     elif text == "📅 5 kunlik":
         city = user_city.get(user_id)
-        if not city:
-            await update.message.reply_text("❗ Avval shahar tanlang")
-            return
+        data = await get_weather(city)
 
-        data = get_weather(city)
         if not data:
             await update.message.reply_text("❗ Ob-havo olinmadi")
             return
@@ -178,11 +174,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
-    scheduler = AsyncIOScheduler()
-    scheduler.start()
-
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))  # 🔥 FIX
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     print("Bot ishladi...")
     app.run_polling()
