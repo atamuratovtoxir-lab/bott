@@ -2,6 +2,8 @@ import logging
 import requests
 import sqlite3
 import pytz
+import matplotlib.pyplot as plt
+import io
 
 from flask import Flask
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -77,15 +79,16 @@ def get_weather(city):
         "latitude": lat,
         "longitude": lon,
         "hourly": "temperature_2m,precipitation_probability",
+        "daily": "temperature_2m_max,temperature_2m_min",
         "timezone": "auto",
     }
 
     try:
-        return requests.get(url, params=params, timeout=10).json()["hourly"]
+        return requests.get(url, params=params, timeout=10).json()
     except:
         return None
 
-# 👤 DB FUNKSIYALAR
+# DB funksiyalar
 def save_user(user_id, city):
     cursor.execute(
         "INSERT OR REPLACE INTO users (user_id, city) VALUES (?, ?)",
@@ -97,17 +100,23 @@ def get_users():
     cursor.execute("SELECT user_id, city FROM users")
     return cursor.fetchall()
 
+def get_user_city(user_id):
+    cursor.execute("SELECT city FROM users WHERE user_id = ?", (user_id,))
+    result = cursor.fetchone()
+    return result[0] if result else None
+
 # 🚀 START
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    keyboard = [[r] for r in REGIONS.keys()]
+    keyboard = [["📍 Viloyat tanlash"]]
 
     await update.message.reply_text(
-        f"👋 Salom {user.first_name}!\n\n"
-        "🤖 Bot:\n"
-        "• 08:00 ob-havo\n"
-        "• 3 soatda yomg‘ir alert\n\n"
-        "📍 Viloyatni tanlang:",
+        "👋 Salom!\n\n"
+        "🤖 Men sizga quyidagilarni beraman:\n"
+        "• 🌤 Hozirgi ob-havo\n"
+        "• 📊 24 soatlik ob-havo\n"
+        "• 📅 5 kunlik grafik\n"
+        "• ⚠️ Yomg‘ir ogohlantirish\n\n"
+        "📍 Boshlash uchun viloyatni tanlang:",
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
     )
 
@@ -116,16 +125,88 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
 
-    if text in REGIONS:
-        keyboard = [[c] for c in REGIONS[text]]
+    # 📍 Viloyat tanlash
+    if text == "📍 Viloyat tanlash":
+        keyboard = [[r] for r in REGIONS.keys()]
         await update.message.reply_text(
-            f"🏙 {text} → shaharni tanlang:",
+            "📍 Viloyatni tanlang:",
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
         )
         return
 
-    save_user(user_id, text)
-    await update.message.reply_text(f"✅ Tanlandi: {text}")
+    # 🌍 Shahar tanlash
+    if text in sum(REGIONS.values(), []):
+        save_user(user_id, text)
+
+        keyboard = [
+            ["🌤 Hozirgi ob-havo"],
+            ["📊 24 soatlik ob-havo"],
+            ["📅 5 kunlik grafik"],
+            ["⬅️ Orqaga"]
+        ]
+
+        await update.message.reply_text(
+            f"✅ Tanlandi: {text}\n\nEndi tanlang:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        )
+        return
+
+    # ⬅️ Orqaga
+    if text == "⬅️ Orqaga":
+        keyboard = [[r] for r in REGIONS.keys()]
+        await update.message.reply_text(
+            "📍 Viloyatni tanlang:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        )
+        return
+
+    # 🌤 HOZIRGI
+    if text == "🌤 Hozirgi ob-havo":
+        city = get_user_city(user_id)
+        data = get_weather(city)
+
+        temp = data["hourly"]["temperature_2m"][0]
+        await update.message.reply_text(f"🌤 {city}\nHozir: {temp}°C")
+        return
+
+    # 📊 24 soat
+    if text == "📊 24 soatlik ob-havo":
+        city = get_user_city(user_id)
+        data = get_weather(city)
+
+        msg = f"📊 {city}:\n\n"
+        temps = data["hourly"]["temperature_2m"]
+
+        for i in range(24):
+            msg += f"{i}:00 → {temps[i]}°C\n"
+
+        await update.message.reply_text(msg)
+        return
+
+    # 📅 5 kunlik grafik
+    if text == "📅 5 kunlik grafik":
+        city = get_user_city(user_id)
+        data = get_weather(city)
+
+        dates = data["daily"]["time"]
+        max_t = data["daily"]["temperature_2m_max"]
+        min_t = data["daily"]["temperature_2m_min"]
+
+        plt.figure()
+        plt.plot(dates, max_t, label="Max")
+        plt.plot(dates, min_t, label="Min")
+        plt.title(f"{city} - 5 kun")
+        plt.xlabel("Kun")
+        plt.ylabel("°C")
+        plt.legend()
+
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png")
+        buf.seek(0)
+
+        await update.message.reply_photo(photo=buf)
+        plt.close()
+        return
 
 # 🌅 DAILY
 async def daily_send(app):
@@ -134,9 +215,9 @@ async def daily_send(app):
         if not data:
             continue
 
-        temps = data["temperature_2m"][:24]
-        msg = f"🌅 {city} bugungi ob-havo:\n\n"
+        temps = data["hourly"]["temperature_2m"][:24]
 
+        msg = f"🌅 {city} bugungi:\n\n"
         for i, t in enumerate(temps):
             msg += f"{i}:00 → {t}°C\n"
 
@@ -152,15 +233,14 @@ async def alert_send(app):
         if not data:
             continue
 
-        rain = data["precipitation_probability"]
+        rain = data["hourly"]["precipitation_probability"]
 
         for i, r in enumerate(rain):
             if r >= 70:
                 try:
                     await app.bot.send_message(
                         chat_id=user_id,
-                        text=f"⚠️ {city} da {i}:00 yomg‘ir ehtimoli {r}%",
-                        disable_notification=True,
+                        text=f"⚠️ {city} da {i}:00 yomg‘ir {r}%",
                     )
                 except:
                     pass
