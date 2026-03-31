@@ -1,9 +1,7 @@
 import logging
 import requests
 import sqlite3
-
 import pytz
-from datetime import datetime
 
 from flask import Flask
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -17,7 +15,7 @@ from telegram.ext import (
     filters,
 )
 
-# 🔐 TOKEN
+# 🔐 TOKEN (O‘ZGARTIRILMADI)
 TOKEN = "8750583800:AAGWDecP47uPEfcYIrZamE45aHpJsxF2RUA"
 
 UZBEK_TZ = pytz.timezone("Asia/Tashkent")
@@ -72,7 +70,6 @@ def get_weather(city):
     }
 
     lat, lon = coords.get(city, (None, None))
-
     if not lat:
         return None
 
@@ -84,12 +81,11 @@ def get_weather(city):
     }
 
     try:
-        data = requests.get(url, params=params, timeout=10).json()
-        return data["hourly"]
+        return requests.get(url, params=params, timeout=10).json()["hourly"]
     except:
         return None
 
-# 👤 USER SAQLASH
+# 👤 DB FUNKSIYALAR
 def save_user(user_id, city):
     cursor.execute(
         "INSERT OR REPLACE INTO users (user_id, city) VALUES (?, ?)",
@@ -108,9 +104,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"👋 Salom {user.first_name}!\n\n"
-        "🤖 Bot imkoniyatlari:\n"
-        "• Har kuni 08:00 ob-havo\n"
-        "• Har 3 soatda yomg‘ir alert\n\n"
+        "🤖 Bot:\n"
+        "• 08:00 ob-havo\n"
+        "• 3 soatda yomg‘ir alert\n\n"
         "📍 Viloyatni tanlang:",
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
     )
@@ -121,9 +117,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
     if text in REGIONS:
-        cities = REGIONS[text]
-        keyboard = [[c] for c in cities]
-
+        keyboard = [[c] for c in REGIONS[text]]
         await update.message.reply_text(
             f"🏙 {text} → shaharni tanlang:",
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
@@ -141,8 +135,8 @@ async def daily_send(app):
             continue
 
         temps = data["temperature_2m"][:24]
-
         msg = f"🌅 {city} bugungi ob-havo:\n\n"
+
         for i, t in enumerate(temps):
             msg += f"{i}:00 → {t}°C\n"
 
@@ -165,7 +159,7 @@ async def alert_send(app):
                 try:
                     await app.bot.send_message(
                         chat_id=user_id,
-                        text=f"⚠️ {city} da {i}:00 da yomg‘ir ehtimoli {r}%",
+                        text=f"⚠️ {city} da {i}:00 yomg‘ir ehtimoli {r}%",
                         disable_notification=True,
                     )
                 except:
@@ -173,12 +167,16 @@ async def alert_send(app):
 
 # 🤖 BOT
 def run_bot():
+    import asyncio
+
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    scheduler = AsyncIOScheduler(timezone=UZBEK_TZ)
+    loop = asyncio.get_event_loop()
+
+    scheduler = AsyncIOScheduler(event_loop=loop, timezone=UZBEK_TZ)
     scheduler.add_job(lambda: app.create_task(daily_send(app)), "cron", hour=8)
     scheduler.add_job(lambda: app.create_task(alert_send(app)), "interval", hours=3)
     scheduler.start()
@@ -197,5 +195,5 @@ def home():
 if __name__ == "__main__":
     import threading
 
-    threading.Thread(target=run_bot).start()
-    web.run(host="0.0.0.0", port=10000)
+    threading.Thread(target=lambda: web.run(host="0.0.0.0", port=10000)).start()
+    run_bot()
