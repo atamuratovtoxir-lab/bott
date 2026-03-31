@@ -17,13 +17,14 @@ from telegram.ext import (
     filters,
 )
 
+# 🔐 TOKEN
 TOKEN = "8750583800:AAGWDecP47uPEfcYIrZamE45aHpJsxF2RUA"
 
 UZBEK_TZ = pytz.timezone("Asia/Tashkent")
 
 logging.basicConfig(level=logging.INFO)
 
-# 🌍 12 TA VILOYAT + SHAHARLAR
+# 🌍 VILOYATLAR
 REGIONS = {
     "Toshkent viloyati": ["Toshkent", "Chirchiq", "Angren", "Bekobod"],
     "Samarqand viloyati": ["Samarqand", "Urgut", "Kattaqo‘rg‘on"],
@@ -55,20 +56,22 @@ conn.commit()
 def get_weather(city):
     url = "https://api.open-meteo.com/v1/forecast"
 
-    lat, lon = {
+    coords = {
         "Toshkent": (41.2995, 69.2401),
         "Samarqand": (39.6547, 66.9750),
         "Buxoro": (39.7747, 64.4286),
         "Andijon": (40.7821, 72.3442),
         "Farg‘ona": (40.3842, 71.7843),
         "Namangan": (41.0011, 71.6726),
-        "Xorazm": (41.5500, 60.6333),
-        "Qashqadaryo": (38.8600, 65.7900),
-        "Surxondaryo": (37.9400, 67.5700),
+        "Urganch": (41.5500, 60.6333),
+        "Qarshi": (38.8600, 65.7900),
+        "Termiz": (37.9400, 67.5700),
         "Jizzax": (40.1158, 67.8422),
-        "Sirdaryo": (40.5000, 68.6667),
+        "Guliston": (40.5000, 68.6667),
         "Navoiy": (40.1000, 65.3700),
-    }.get(city, (None, None))
+    }
+
+    lat, lon = coords.get(city, (None, None))
 
     if not lat:
         return None
@@ -101,56 +104,45 @@ def get_users():
 # 🚀 START
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-
     keyboard = [[r] for r in REGIONS.keys()]
 
     await update.message.reply_text(
         f"👋 Salom {user.first_name}!\n\n"
-        "🤖 Bu bot sizga:\n"
-        "- Har kuni 08:00 da ob-havo yuboradi\n"
-        "- 3 soatda yomg‘ir alert beradi\n\n"
+        "🤖 Bot imkoniyatlari:\n"
+        "• Har kuni 08:00 ob-havo\n"
+        "• Har 3 soatda yomg‘ir alert\n\n"
         "📍 Viloyatni tanlang:",
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
     )
 
-# 📍 REGION
-async def handle_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    region = update.message.text
-
-    if region not in REGIONS:
-        return
-
-    cities = REGIONS[region]
-
-    keyboard = [[c] for c in cities]
-
-    await update.message.reply_text(
-        f"🏙 {region} → shaharni tanlang:",
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
-    )
-
-# 🌤 CITY
-async def handle_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    city = update.message.text
+# 🔥 TEXT HANDLER
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
     user_id = update.effective_user.id
 
-    save_user(user_id, city)
+    if text in REGIONS:
+        cities = REGIONS[text]
+        keyboard = [[c] for c in cities]
 
-    await update.message.reply_text(f"✅ Tanlandi: {city}")
+        await update.message.reply_text(
+            f"🏙 {text} → shaharni tanlang:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        )
+        return
 
-# 🌅 DAILY 08:00
+    save_user(user_id, text)
+    await update.message.reply_text(f"✅ Tanlandi: {text}")
+
+# 🌅 DAILY
 async def daily_send(app):
-    users = get_users()
-
-    for user_id, city in users:
+    for user_id, city in get_users():
         data = get_weather(city)
         if not data:
             continue
 
         temps = data["temperature_2m"][:24]
 
-        msg = f"🌅 Bugungi ob-havo ({city})\n\n"
-
+        msg = f"🌅 {city} bugungi ob-havo:\n\n"
         for i, t in enumerate(temps):
             msg += f"{i}:00 → {t}°C\n"
 
@@ -159,11 +151,9 @@ async def daily_send(app):
         except:
             pass
 
-# 🌧 ALERT (3 soatda)
+# 🌧 ALERT
 async def alert_send(app):
-    users = get_users()
-
-    for user_id, city in users:
+    for user_id, city in get_users():
         data = get_weather(city)
         if not data:
             continue
@@ -172,12 +162,10 @@ async def alert_send(app):
 
         for i, r in enumerate(rain):
             if r >= 70:
-                msg = f"⚠️ DIQQAT!\n\n🌧 {city} da {i}:00 da yomg‘ir ehtimoli bor ({r}%)"
-
                 try:
                     await app.bot.send_message(
                         chat_id=user_id,
-                        text=msg,
+                        text=f"⚠️ {city} da {i}:00 da yomg‘ir ehtimoli {r}%",
                         disable_notification=True,
                     )
                 except:
@@ -188,18 +176,14 @@ def run_bot():
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_city))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_region))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     scheduler = AsyncIOScheduler(timezone=UZBEK_TZ)
-
-    scheduler.add_job(lambda: app.create_task(daily_send(app)), "cron", hour=8, minute=0)
+    scheduler.add_job(lambda: app.create_task(daily_send(app)), "cron", hour=8)
     scheduler.add_job(lambda: app.create_task(alert_send(app)), "interval", hours=3)
-
     scheduler.start()
 
     print("🚀 Bot ishlayapti")
-
     app.run_polling()
 
 # 🌐 WEB
