@@ -7,8 +7,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 TOKEN = "8750583800:AAGWDecP47uPEfcYIrZamE45aHpJsxF2RUA"
 
-# USER DATA
+# DATA
 user_city = {}
+daily_users = set()
 
 # VILOYATLAR
 regions = {
@@ -73,10 +74,11 @@ def get_weather(city):
     url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,precipitation_probability,wind_speed_10m&timezone=Asia/Tashkent"
 
     try:
-        return requests.get(url).json()
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        return r.json()
     except:
         return None
-
 
 # START
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -86,13 +88,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
 
-
 # MESSAGE HANDLER
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
+    text = update.message.text.strip()
     user_id = update.effective_user.id
 
-    # VILOYAT
+    daily_users.add(user_id)
+
     if text in regions:
         keyboard = [[c] for c in regions[text]]
         await update.message.reply_text(
@@ -100,7 +102,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         )
 
-    # SHAHAR
     elif text in city_coords:
         user_city[user_id] = text
 
@@ -116,52 +117,51 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         )
 
-    # HOZIRGI
     elif text == "🌤 Hozirgi ob-havo":
         city = user_city.get(user_id)
-
         if not city:
-            await update.message.reply_text("Avval shahar tanlang")
+            await update.message.reply_text("❗ Avval shahar tanlang")
             return
 
         data = get_weather(city)
+        if not data:
+            return
 
         temp = data["hourly"]["temperature_2m"][0]
         wind = data["hourly"]["wind_speed_10m"][0]
 
         await update.message.reply_text(f"🌤 {city}\n🌡 {temp}°C\n🌬 {wind} m/s")
 
-    # 24 SOAT
     elif text == "📊 24 soatlik":
         city = user_city.get(user_id)
-
         if not city:
+            await update.message.reply_text("❗ Avval shahar tanlang")
             return
 
         data = get_weather(city)
+        if not data:
+            return
 
-        msg = "📊 24 soat:\n\n"
-        for i in range(24):
-            time = data["hourly"]["time"][i][11:16]
-            temp = data["hourly"]["temperature_2m"][i]
-            msg += f"{time} - {temp}°C\n"
+        msg = "📊 24 soat (08:00 - 23:00)\n\n"
+
+        hours = data["hourly"]["time"]
+        temps = data["hourly"]["temperature_2m"]
+
+        for i in range(8, 24):
+            time = hours[i][11:16]
+            msg += f"{time} - {temps[i]}°C\n"
 
         await update.message.reply_text(msg)
 
-    # 5 KUN
     elif text == "📅 5 kunlik":
         city = user_city.get(user_id)
-
         if not city:
             return
 
         data = get_weather(city)
-
         temps = data["hourly"]["temperature_2m"][:120]
 
         plt.plot(temps)
-        plt.title(city)
-
         file = f"{city}.png"
         plt.savefig(file)
         plt.close()
@@ -169,14 +169,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_photo(photo=open(file, "rb"))
         os.remove(file)
 
-    # BACK
     elif text == "⬅️ Orqaga":
         await start(update, context)
 
+# DAILY SEND
+async def send_daily(app):
+    for user_id in daily_users:
+        city = user_city.get(user_id)
+        if not city:
+            continue
 
-# ALERT (1 kun oldin)
-async def alert(app):
-    for user_id, city in user_city.items():
+        data = get_weather(city)
+        if not data:
+            continue
+
+        msg = f"🌤 Bugungi ob-havo ({city})\n\n"
+
+        hours = data["hourly"]["time"]
+        temps = data["hourly"]["temperature_2m"]
+        wind = data["hourly"]["wind_speed_10m"]
+        rain = data["hourly"]["precipitation_probability"]
+
+        for i in range(8, 24):
+            time = hours[i][11:16]
+            msg += f"{time} 🌡{temps[i]}°C 🌬{wind[i]} m/s 🌧{rain[i]}%\n"
+
+        await app.bot.send_message(user_id, msg)
+
+# RAIN ALERT
+async def rain_alert(app):
+    for user_id in daily_users:
+        city = user_city.get(user_id)
+        if not city:
+            continue
+
         data = get_weather(city)
         if not data:
             continue
@@ -184,23 +210,22 @@ async def alert(app):
         rain = data["hourly"]["precipitation_probability"]
 
         if any(r > 60 for r in rain[24:48]):
-            await app.bot.send_message(user_id, f"🌧 {city}da 1 kun ichida yomg‘ir bor!")
-
+            await app.bot.send_message(user_id, f"⚠️ {city}da yomg‘ir bo‘lish ehtimoli bor!")
 
 # MAIN
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(lambda: app.create_task(alert(app)), "interval", hours=6)
+    scheduler.add_job(lambda: app.create_task(send_daily(app)), "cron", hour=8, minute=0)
+    scheduler.add_job(lambda: app.create_task(rain_alert(app)), "interval", hours=6)
     scheduler.start()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT, handle_message))
 
-    print("Bot ishga tushdi...")
+    print("Bot ishladi...")
     app.run_polling()
-
 
 if __name__ == "__main__":
     main()
