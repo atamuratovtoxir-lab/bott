@@ -1,17 +1,18 @@
 import requests
+import matplotlib
+matplotlib.use('Agg')  # 🔥 MUHIM (Render uchun)
 import matplotlib.pyplot as plt
 import os
+
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 TOKEN = "8750583800:AAGWDecP47uPEfcYIrZamE45aHpJsxF2RUA"
 
-# DATA
 user_city = {}
 daily_users = set()
 
-# VILOYATLAR
 regions = {
     "Toshkent": ["Toshkent", "Chirchiq", "Angren"],
     "Samarqand": ["Samarqand", "Urgut", "Kattaqo‘rg‘on"],
@@ -27,7 +28,6 @@ regions = {
     "Qoraqalpog‘iston": ["Nukus", "Taxiatosh", "Chimboy"]
 }
 
-# KOORDINATALAR
 city_coords = {
     "Toshkent": (41.2995, 69.2401),
     "Chirchiq": (41.4689, 69.5822),
@@ -67,10 +67,8 @@ city_coords = {
     "Chimboy": (42.9500, 59.0667)
 }
 
-# WEATHER API
 def get_weather(city):
     lat, lon = city_coords.get(city, (41, 69))
-
     url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,precipitation_probability,wind_speed_10m&timezone=Asia/Tashkent"
 
     try:
@@ -80,7 +78,6 @@ def get_weather(city):
     except:
         return None
 
-# START
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[r] for r in regions.keys()]
     await update.message.reply_text(
@@ -88,9 +85,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
 
-# MESSAGE HANDLER
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
+    print(f"Keldi: {repr(text)}")  # 🔥 DEBUG
     user_id = update.effective_user.id
 
     daily_users.add(user_id)
@@ -125,6 +122,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         data = get_weather(city)
         if not data:
+            await update.message.reply_text("❗ Ob-havo olinmadi")
             return
 
         temp = data["hourly"]["temperature_2m"][0]
@@ -140,10 +138,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         data = get_weather(city)
         if not data:
+            await update.message.reply_text("❗ Ob-havo olinmadi")
             return
 
-        msg = "📊 24 soat (08:00 - 23:00)\n\n"
-
+        msg = "📊 24 soat\n\n"
         hours = data["hourly"]["time"]
         temps = data["hourly"]["temperature_2m"]
 
@@ -156,9 +154,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "📅 5 kunlik":
         city = user_city.get(user_id)
         if not city:
+            await update.message.reply_text("❗ Avval shahar tanlang")
             return
 
         data = get_weather(city)
+        if not data:
+            await update.message.reply_text("❗ Ob-havo olinmadi")
+            return
+
         temps = data["hourly"]["temperature_2m"][:120]
 
         plt.plot(temps)
@@ -172,57 +175,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "⬅️ Orqaga":
         await start(update, context)
 
-# DAILY SEND
-async def send_daily(app):
-    for user_id in daily_users:
-        city = user_city.get(user_id)
-        if not city:
-            continue
-
-        data = get_weather(city)
-        if not data:
-            continue
-
-        msg = f"🌤 Bugungi ob-havo ({city})\n\n"
-
-        hours = data["hourly"]["time"]
-        temps = data["hourly"]["temperature_2m"]
-        wind = data["hourly"]["wind_speed_10m"]
-        rain = data["hourly"]["precipitation_probability"]
-
-        for i in range(8, 24):
-            time = hours[i][11:16]
-            msg += f"{time} 🌡{temps[i]}°C 🌬{wind[i]} m/s 🌧{rain[i]}%\n"
-
-        await app.bot.send_message(user_id, msg)
-
-# RAIN ALERT
-async def rain_alert(app):
-    for user_id in daily_users:
-        city = user_city.get(user_id)
-        if not city:
-            continue
-
-        data = get_weather(city)
-        if not data:
-            continue
-
-        rain = data["hourly"]["precipitation_probability"]
-
-        if any(r > 60 for r in rain[24:48]):
-            await app.bot.send_message(user_id, f"⚠️ {city}da yomg‘ir bo‘lish ehtimoli bor!")
-
-# MAIN
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(lambda: app.create_task(send_daily(app)), "cron", hour=8, minute=0)
-    scheduler.add_job(lambda: app.create_task(rain_alert(app)), "interval", hours=6)
     scheduler.start()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT, handle_message))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))  # 🔥 FIX
 
     print("Bot ishladi...")
     app.run_polling()
