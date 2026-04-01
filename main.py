@@ -6,87 +6,94 @@ import os
 
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
-
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 TOKEN = "8750583800:AAESA_ESsTR3iX3yJIgt_AzeRASSe1L441Q"
 
 user_city = {}
-target_user_id = None
 
-# 📍 O‘ZBEKISTON SHAHARLARI
+# 📍 REGION + SHAHAR + KOORDINATA
 regions = {
-    "Toshkent viloyati": ["Toshkent", "Chirchiq", "Angren", "Olmaliq", "Bekobod"],
-    "Samarqand viloyati": ["Samarqand", "Urgut", "Ishtixon", "Kattaqo‘rg‘on"],
-    "Farg‘ona viloyati": ["Farg‘ona", "Qo‘qon", "Marg‘ilon", "Rishton"],
-    "Andijon viloyati": ["Andijon", "Asaka", "Shahrixon", "Xonobod"],
-    "Namangan viloyati": ["Namangan", "Chortoq", "Kosonsoy", "Pop"],
-    "Buxoro viloyati": ["Buxoro", "Kogon", "G‘ijduvon"],
-    "Navoiy viloyati": ["Navoiy", "Zarafshon", "Karmana"],
-    "Qashqadaryo viloyati": ["Qarshi", "Shahrisabz", "Kitob"],
-    "Surxondaryo viloyati": ["Termiz", "Denov", "Boysun"],
-    "Xorazm viloyati": ["Urganch", "Xiva", "Xonqa"],
-    "Jizzax": ["Jizzax", "Zomin", "G‘allaorol"],
-    "Qoraqalpog‘iston": ["Nukus", "Taxiatosh", "Chimboy"]
+    "Toshkent viloyati": {
+        "Toshkent": (41.31, 69.24), "Chirchiq": (41.47, 69.58),
+        "Angren": (41.02, 70.14), "Olmaliq": (40.85, 69.60), "Bekobod": (40.22, 69.27)
+    },
+    "Samarqand viloyati": {
+        "Samarqand": (39.65, 66.97), "Urgut": (39.40, 67.25),
+        "Ishtixon": (39.97, 66.49), "Kattaqo‘rg‘on": (39.90, 66.26)
+    },
+    "Farg‘ona viloyati": {
+        "Farg‘ona": (40.39, 71.78), "Qo‘qon": (40.52, 70.94),
+        "Marg‘ilon": (40.47, 71.72), "Rishton": (40.35, 71.28)
+    },
+    "Andijon viloyati": {
+        "Andijon": (40.78, 72.34), "Asaka": (40.64, 72.24),
+        "Shahrixon": (40.71, 72.06), "Xonobod": (40.80, 72.97)
+    },
+    "Namangan viloyati": {
+        "Namangan": (41.00, 71.67), "Chortoq": (41.07, 71.82),
+        "Kosonsoy": (41.25, 71.55), "Pop": (40.87, 71.11)
+    },
+    "Buxoro viloyati": {
+        "Buxoro": (39.77, 64.42), "Kogon": (39.72, 64.55),
+        "G‘ijduvon": (40.10, 64.68)
+    },
+    "Navoiy viloyati": {
+        "Navoiy": (40.10, 65.37), "Zarafshon": (41.57, 64.23),
+        "Karmana": (40.09, 65.38)
+    },
+    "Qashqadaryo viloyati": {
+        "Qarshi": (38.86, 65.79), "Shahrisabz": (39.05, 66.83),
+        "Kitob": (39.12, 66.88)
+    },
+    "Surxondaryo viloyati": {
+        "Termiz": (37.22, 67.28), "Denov": (38.27, 67.90),
+        "Boysun": (38.20, 67.20)
+    },
+    "Xorazm viloyati": {
+        "Urganch": (41.55, 60.63), "Xiva": (41.38, 60.36),
+        "Xonqa": (41.47, 60.78)
+    },
+    "Jizzax": {
+        "Jizzax": (40.12, 67.84), "Zomin": (39.96, 68.40),
+        "G‘allaorol": (40.02, 67.60)
+    },
+    "Qoraqalpog‘iston": {
+        "Nukus": (42.46, 59.61), "Taxiatosh": (42.32, 59.60),
+        "Chimboy": (42.93, 59.77)
+    }
 }
-
-UZBEK_CITIES = []
-for v in regions.values():
-    UZBEK_CITIES.extend(v)
-
-BUTTONS = {
-    "🌤 Hozirgi ob-havo",
-    "📊 24 soat",
-    "📅 5 kunlik",
-    "⚙️ Sozlamalar",
-    "📍 Joy tanlash",
-    "🔙 Orqaga"
-}
-
-# 🌍 GEO
-async def get_coords(city):
-    url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1&language=uz&format=json"
-
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            data = await resp.json()
-
-    if data.get("results"):
-        return data["results"][0]["latitude"], data["results"][0]["longitude"]
-
-    return None, None
 
 # 🌦 WEATHER
 async def get_weather(city):
-    lat, lon = await get_coords(city)
+    for r in regions.values():
+        if city in r:
+            lat, lon = r[city]
 
-    if not lat:
-        return None
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&hourly=temperature_2m,weathercode,precipitation_probability&daily=temperature_2m_max,temperature_2m_min&timezone=Asia/Tashkent"
 
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&hourly=temperature_2m,weathercode&daily=temperature_2m_max,temperature_2m_min&timezone=Asia/Tashkent"
+    async with aiohttp.ClientSession() as s:
+        async with s.get(url) as r:
+            return await r.json()
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            return await resp.json()
-
-# 🌧 YOMG‘IR TEKSHIRISH
-def check_rain(data):
-    codes = data["hourly"]["weathercode"]
-
-    for code in codes[:24]:
+# 🌧 SMART ALERT
+def rain_alert(data, city):
+    for i in range(48):
+        code = data["hourly"]["weathercode"][i]
         if 51 <= code <= 99:
-            return True
+            t = data["hourly"]["time"][i]
+            prob = data["hourly"]["precipitation_probability"][i]
+            return f"""🌧 DIQQAT!
 
-    return False
+📍 {city}
+📅 {t[:10]}
+⏰ {t[11:16]}
 
-# 📊 GRAPH
-async def send_graph(update: Update, context):
-    user_id = update.effective_user.id
-    city = user_city.get(user_id)
+Yomg‘ir ehtimoli: {prob}%"""
+    return None
 
-    if not city:
-        return await update.message.reply_text("❗ Avval shahar tanlang")
-
+# 📊 GRAFIK
+async def graph(update, city):
     data = await get_weather(city)
 
     dates = data["daily"]["time"]
@@ -96,12 +103,10 @@ async def send_graph(update: Update, context):
     plt.figure()
     plt.plot(dates, max_t)
     plt.plot(dates, min_t)
-
-    plt.title(city)
     plt.xticks(rotation=45)
     plt.tight_layout()
 
-    file = "graph.png"
+    file = "g.png"
     plt.savefig(file)
     plt.close()
 
@@ -110,130 +115,111 @@ async def send_graph(update: Update, context):
 
     os.remove(file)
 
-# 📌 START
-async def start(update: Update, context):
-    global target_user_id
-    target_user_id = update.effective_user.id
+# 📌 MENYU
+def main_menu():
+    return ReplyKeyboardMarkup([
+        ["🌤 Hozirgi ob-havo", "📊 24 soat"],
+        ["📅 5 kunlik", "⚙️ Sozlamalar"]
+    ], resize_keyboard=True)
 
-    keyboard = [
-        ["🌤 Hozirgi ob-havo"],
-        ["📊 24 soat"],
-        ["📅 5 kunlik"],
-        ["⚙️ Sozlamalar"]
-    ]
+# 🚀 START
+async def start(update: Update, context):
+    name = update.effective_user.first_name
 
     await update.message.reply_text(
-        "👋 Salom!\nO‘zbekiston shahrini yozing 🌍",
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        f"👋 Salom {name}!\n\nOb-havo olish uchun viloyat/shahar tanlang!",
+        reply_markup=ReplyKeyboardMarkup([["📍 Belgilash"]], resize_keyboard=True)
     )
+
+# 📍 REGION MENU
+async def regions_menu(update):
+    kb = [[r] for r in regions]
+    kb.append(["🔙 Orqaga"])
+    await update.message.reply_text("📍 Viloyat tanlang:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
 
 # ⚙️ SETTINGS
-async def settings(update: Update, context):
-    keyboard = [
-        ["📍 Joy tanlash"],
-        ["🔙 Orqaga"]
-    ]
+async def settings(update):
+    kb = [["🔄 Shaharni almashtirish"], ["🔙 Orqaga"]]
+    await update.message.reply_text("⚙️ Sozlamalar", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
 
-    await update.message.reply_text(
-        "⚙️ Sozlamalar",
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    )
-
-# 📍 REGION
-async def choose_region(update):
-    keyboard = [[r] for r in regions]
-    keyboard.append(["🔙 Orqaga"])
-
-    await update.message.reply_text(
-        "📍 Viloyat tanlang:",
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    )
-
-# 📌 HANDLE
+# 🎯 HANDLE
 async def handle(update: Update, context):
     text = update.message.text
-    user_id = update.effective_user.id
+    uid = update.effective_user.id
 
     if text == "🔙 Orqaga":
-        return await start(update, context)
+        if uid in user_city:
+            return await update.message.reply_text("🏠 Bosh menyu", reply_markup=main_menu())
+        else:
+            return await start(update, context)
+
+    if text == "📍 Belgilash":
+        return await regions_menu(update)
 
     if text == "⚙️ Sozlamalar":
-        return await settings(update, context)
+        return await settings(update)
 
-    if text == "📍 Joy tanlash":
-        return await choose_region(update)
+    if text == "🔄 Shaharni almashtirish":
+        return await regions_menu(update)
 
     if text in regions:
-        keyboard = [[c] for c in regions[text]]
-        keyboard.append(["🔙 Orqaga"])
+        kb = [[c] for c in regions[text]]
+        kb.append(["🔙 Orqaga"])
+        return await update.message.reply_text("🏙 Shahar tanlang:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
 
-        return await update.message.reply_text(
-            "🏙 Shahar tanlang:",
-            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-        )
+    for r in regions.values():
+        if text in r:
+            user_city[uid] = text
+            return await update.message.reply_text(f"✅ {text} saqlandi", reply_markup=main_menu())
+
+    city = user_city.get(uid)
+    if not city:
+        return await update.message.reply_text("❗ Avval shahar tanlang")
+
+    data = await get_weather(city)
 
     if text == "🌤 Hozirgi ob-havo":
-        city = user_city.get(user_id)
-
-        if not city:
-            return await update.message.reply_text("❗ Avval shahar tanlang")
-
-        data = await get_weather(city)
         cw = data["current_weather"]
+        msg = f"""📍 {city}
 
-        return await update.message.reply_text(
-            f"{city}\n🌡 {cw['temperature']}°C\n🌬 {cw['windspeed']}"
-        )
+🌡 {cw['temperature']}°C
+💨 {cw['windspeed']} km/h"""
+        alert = rain_alert(data, city)
+        if alert:
+            msg += "\n\n" + alert
+        return await update.message.reply_text(msg)
 
     if text == "📊 24 soat":
-        city = user_city.get(user_id)
-
-        if not city:
-            return await update.message.reply_text("❗ Avval shahar tanlang")
-
-        data = await get_weather(city)
-
-        msg = f"📊 {city}:\n\n"
-
+        msg = f"📊 {city}\n\n"
         for i in range(24):
-            msg += f"{data['hourly']['time'][i][11:16]} - {data['hourly']['temperature_2m'][i]}°C\n"
-
+            t = data["hourly"]["time"][i][11:16]
+            temp = data["hourly"]["temperature_2m"][i]
+            msg += f"{t} → {temp}°C\n"
         return await update.message.reply_text(msg)
 
     if text == "📅 5 kunlik":
-        return await send_graph(update, context)
+        return await graph(update, city)
 
-    # 🌍 SHAHAR SAQLASH
-    if text in UZBEK_CITIES:
-        user_city[user_id] = text
-
-        return await update.message.reply_text(f"✅ {text} saqlandi")
-
-    if text not in BUTTONS:
-        return await update.message.reply_text("❌ Faqat O‘zbekiston shaharlari!")
-
-# 🌅 08:00 + 🌧 CHECK
+# 🌅 AUTO XABAR
 async def morning_job(context):
-    for user_id, city in user_city.items():
+    for uid, city in user_city.items():
         try:
             data = await get_weather(city)
             cw = data["current_weather"]
 
             await context.bot.send_message(
-                chat_id=user_id,
-                text=f"🌅 Ertalab\n\n{city}\n🌡 {cw['temperature']}°C"
+                chat_id=uid,
+                text=f"🌅 {city}\n🌡 {cw['temperature']}°C"
             )
 
-            if check_rain(data):
-                await context.bot.send_message(
-                    chat_id=user_id,
-                    text=f"🌧 DIQQAT!\n{city} da yomg‘ir kutilmoqda!"
-                )
+            alert = rain_alert(data, city)
+            if alert:
+                await context.bot.send_message(chat_id=uid, text=alert)
 
         except:
             pass
 
-# 🚀 MAIN
+# 🚀 RUN
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
@@ -244,7 +230,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT, handle))
 
-    print("Bot ishladi...")
+    print("🔥 BOT ISHLADI")
     app.run_polling()
 
 if __name__ == "__main__":
