@@ -128,30 +128,30 @@ def main_menu():
     ], resize_keyboard=True)
 
 # 🚀 START
-async def start(update: Update, context):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Salom!\nViloyatni tanlang:",
         reply_markup=ReplyKeyboardMarkup([["📍 Belgilash"]], resize_keyboard=True)
     )
 
 # 📍 REGION
-async def regions_menu(update):
+async def regions_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [[r] for r in regions]
     kb.append(["🔙 Orqaga"])
     await update.message.reply_text("📍 Viloyat:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
 
 # ⚙️ SETTINGS
-async def settings(update):
+async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [["🔄 Shaharni almashtirish"], ["🔙 Orqaga"]]
     await update.message.reply_text("⚙️ Sozlamalar", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
 
 # 🎯 HANDLE
-async def handle(update: Update, context):
+async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     uid = update.effective_user.id
 
     if text == "📍 Belgilash":
-        return await regions_menu(update)
+        return await regions_menu(update, context)
 
     if text == "🔙 Orqaga":
         return await update.message.reply_text("🏠 Menyu", reply_markup=main_menu())
