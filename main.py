@@ -16,7 +16,6 @@ TOKEN = "8750583800:AAESA_ESsTR3iX3yJIgt_AzeRASSe1L441Q"
 
 user_city = {}
 
-# 📍 REGION + SHAHAR + KOORDINATA
 regions = {
     "Toshkent viloyati": {
         "Toshkent": (41.31, 69.24), "Chirchiq": (41.47, 69.58),
@@ -68,34 +67,20 @@ regions = {
     }
 }
 
-# 🌦 WEATHER
+# 🌦 OB-HAVO
 async def get_weather(city):
-    lat = None
-    lon = None
-
     for r in regions.values():
         if city in r:
             lat, lon = r[city]
             break
-
-    if lat is None:
+    else:
         return None
 
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&hourly=temperature_2m,weathercode,precipitation_probability&daily=temperature_2m_max,temperature_2m_min&timezone=Asia/Tashkent"
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&hourly=temperature_2m,precipitation_probability&daily=temperature_2m_max,temperature_2m_min&timezone=Asia/Tashkent"
 
     async with aiohttp.ClientSession() as s:
         async with s.get(url) as r:
             return await r.json()
-
-# 🌧 ALERT
-def rain_alert(data, city):
-    for i in range(48):
-        code = data["hourly"]["weathercode"][i]
-        if 51 <= code <= 99:
-            t = data["hourly"]["time"][i]
-            prob = data["hourly"]["precipitation_probability"][i]
-            return f"🌧 DIQQAT!\n📍 {city}\n⏰ {t}\nYomg‘ir: {prob}%"
-    return None
 
 # 📊 GRAFIK
 async def graph(update, city):
@@ -134,13 +119,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=ReplyKeyboardMarkup([["📍 Belgilash"]], resize_keyboard=True)
     )
 
-# 📍 REGION
+# 📍 VILOYAT
 async def regions_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [[r] for r in regions]
     kb.append(["🔙 Orqaga"])
     await update.message.reply_text("📍 Viloyat:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
 
-# ⚙️ SETTINGS
+# ⚙️ SOZLAMALAR
 async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [["🔄 Shaharni almashtirish"], ["🔙 Orqaga"]]
     await update.message.reply_text("⚙️ Sozlamalar", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
@@ -190,21 +175,21 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await graph(update, city)
 
 # 🌅 AUTO
-async def morning_job(context):
+async def morning_job(app):
     for uid, city in user_city.items():
         data = await get_weather(city)
         if not data:
             continue
 
         cw = data["current_weather"]
-        await context.bot.send_message(uid, f"🌅 {city}\n🌡 {cw['temperature']}°C")
+        await app.bot.send_message(uid, f"🌅 {city}\n🌡 {cw['temperature']}°C")
 
 # 🚀 MAIN
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(morning_job, "cron", hour=8)
+    scheduler.add_job(lambda: asyncio.create_task(morning_job(app)), "cron", hour=8)
     scheduler.start()
 
     app.add_handler(CommandHandler("start", start))
