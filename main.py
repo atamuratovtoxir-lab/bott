@@ -32,7 +32,8 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except:
                 pass
 
-async def main():
+# 🚀 MUHIM: async main YO‘Q
+def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
@@ -40,9 +41,8 @@ async def main():
 
     print("🚀 Bot ishga tushdi")
 
-    # ❗ MUHIM: asyncio.run YO‘Q!
-    await app.run_polling()
+    # TO‘G‘RI USUL
+    app.run_polling()
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    main()
