@@ -176,8 +176,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "🌤 Hozirgi ob-havo":
         cw = data["current_weather"]
-        msg = f"{city}\n🌡 {cw['temperature']}°C\n💨 {cw['windspeed']}"
-        return await update.message.reply_text(msg)
+        return await update.message.reply_text(f"{city}\n🌡 {cw['temperature']}°C\n💨 {cw['windspeed']}")
 
     if text == "📊 24 soat":
         msg = ""
@@ -209,7 +208,7 @@ def main():
     scheduler.start()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT, handle))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
 
     print("BOT ISHLADI 🚀")
     app.run_polling()
