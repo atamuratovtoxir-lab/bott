@@ -1,231 +1,196 @@
-import logging
-import os
 import aiohttp
-from datetime import datetime
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from datetime import datetime, timedelta
+from telegram import (
+    Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
+)
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
-    ContextTypes, filters, CallbackQueryHandler
+    CallbackQueryHandler, ContextTypes, filters
 )
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-# ================== CONFIG ==================
 TOKEN = "8750583800:AAESA_ESsTR3iX3yJIgt_AzeRASSe1L441Q"
 API_KEY = "0ebc0669786259cc3183b9f7d9d33ecd"
 
-ADMIN_SECRET = "54776+;5+-'zruobtyivvhuj"
+ADMIN_PASSWORD = "54776+;5+-'zruobtyivvhuj"
 
 admin_users = set()
 user_city = {}
-blocked_users = set()
 
-# ================== REGIONS ==================
+# ================== REGION ==================
 regions = {
     "Toshkent": ["Toshkent", "Chirchiq", "Angren"],
-    "Samarqand": ["Samarqand", "Kattaqo‘rg‘on", "Urgut"],
-    "Buxoro": ["Buxoro", "Kogon", "G‘ijduvon"],
-    "Xorazm": ["Urganch", "Xiva", "Hazorasp"],
+    "Samarqand": ["Samarqand", "Urgut", "Kattaqo‘rg‘on"],
+    "Xorazm": ["Urgench", "Xiva", "Hazorasp"],
+    "Buxoro": ["Buxoro", "G‘ijduvon", "Kogon"],
     "Farg‘ona": ["Farg‘ona", "Marg‘ilon", "Qo‘qon"],
-    "Namangan": ["Namangan", "Chortoq", "Pop"],
-    "Andijon": ["Andijon", "Asaka", "Shahrixon"],
+    "Andijon": ["Andijon", "Asaka", "Xonobod"],
+    "Namangan": ["Namangan", "Pop", "Chortoq"],
     "Qashqadaryo": ["Qarshi", "Shahrisabz", "Koson"],
-    "Surxondaryo": ["Termiz", "Denov", "Sherobod"],
-    "Jizzax": ["Jizzax", "G‘allaorol", "Do‘stlik"],
-    "Navoiy": ["Navoiy", "Zarafshon", "Uchkuduk"],
-    "Qoraqalpog‘iston": ["Nukus", "Taxiatosh", "Chimboy"]
+    "Surxondaryo": ["Termiz", "Denov", "Boysun"],
+    "Jizzax": ["Jizzax", "Zomin", "G‘allaorol"],
+    "Navoiy": ["Navoiy", "Zarafshon", "Karmana"],
+    "Qoraqalpog‘iston": ["Nukus", "To‘rtko‘l", "Chimboy"]
 }
 
-# ================== HELPERS ==================
-def is_admin(user_id):
-    return user_id in admin_users
+# ================== TIME ==================
+def uz_time():
+    return (datetime.utcnow() + timedelta(hours=5)).strftime("%d.%m.%Y %H:%M")
 
+# ================== WEATHER ==================
 async def get_weather(city):
-    url = f"http://api.openweathermap.org/data/2.5/weather?q={city},UZ&appid={API_KEY}&units=metric"
+    url = f"http://api.openweathermap.org/data/2.5/weather?q={city},UZ&appid={API_KEY}&units=metric&lang=uz"
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            data = await resp.json()
+    async with aiohttp.ClientSession() as s:
+        async with s.get(url) as r:
+            d = await r.json()
 
-            temp = data["main"]["temp"]
-            desc = data["weather"][0]["description"]
+    temp = d["main"]["temp"]
+    desc = d["weather"][0]["description"]
 
-            if "rain" in desc:
-                uz = "Yomg‘irli"
-            elif "clear" in desc:
-                uz = "Ochiq"
-            elif "cloud" in desc:
-                uz = "Bulutli"
-            else:
-                uz = desc
+    if "rain" in desc:
+        emoji = "🌧"
+    elif "cloud" in desc:
+        emoji = "☁️"
+    else:
+        emoji = "☀️"
 
-            return f"{temp}°C ({uz})"
+    return temp, desc, emoji
 
 # ================== START ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton(r, callback_data=f"region|{r}")]
-        for r in regions
-    ]
+
+    keyboard = [[r] for r in regions]
 
     await update.message.reply_text(
-        "👋 Assalomu alaykum!\nViloyatni tanlang:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        "🤖 ULTRA WEATHER BOT\n\n📍 Viloyatni tanlang:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
 
-# ================== CALLBACK ==================
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+# ================== ADMIN PANEL ==================
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🔐 Parolni kiriting:")
 
-    data = query.data
-    uid = query.from_user.id
+# ================== HANDLE ==================
+async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    text = update.message.text
 
-    if data.startswith("region"):
-        region = data.split("|")[1]
+    # ADMIN LOGIN
+    if text == ADMIN_PASSWORD:
+        admin_users.add(uid)
+        await update.message.reply_text("👑 Admin panelga kirdingiz!")
+        return
 
-        buttons = [
-            [InlineKeyboardButton(city, callback_data=f"city|{city}")]
-            for city in regions[region]
-        ]
+    # ADMIN COMMAND
+    if uid in admin_users and text.startswith("/broadcast"):
+        msg = text.replace("/broadcast", "").strip()
 
-        await query.edit_message_text(
-            f"{region} → Shahar tanlang:",
-            reply_markup=InlineKeyboardMarkup(buttons)
+        for u in user_city.keys():
+            await context.bot.send_message(u, f"📢 Admin: {msg}")
+
+        return
+
+    # REGION
+    if text in regions:
+        keyboard = [[c] for c in regions[text]]
+
+        await update.message.reply_text(
+            "🏙 Shaharni tanlang:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         )
+        return
 
-    elif data.startswith("city"):
-        city = data.split("|")[1]
-        user_city[uid] = city
+    # CITY
+    for cities in regions.values():
+        if text in cities:
+            user_city[uid] = text
 
-        weather = await get_weather(city)
-        now = datetime.now().strftime("%H:%M")
+            temp, desc, emoji = await get_weather(text)
 
-        text = f"""
-🏙 Shahar: {city}
-🕒 Vaqt: {now}
+            await update.message.reply_text(
+f"""
+📍 {text}
+🕒 {uz_time()}
 
 🌤 Ob-havo:
-{weather}
+🌡 {temp}°C
+{emoji} {desc}
 """
+            )
+            return
 
-        await query.edit_message_text(text)
+# ================== FORECAST ==================
+async def forecast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-# ================== ADMIN CODE ==================
-async def admin_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
+    uid = update.effective_user.id
+    city = user_city.get(uid)
+
+    if not city:
         return
 
-    code = context.args[0]
+    url = f"http://api.openweathermap.org/data/2.5/forecast?q={city},UZ&appid={API_KEY}&units=metric"
 
-    if code == ADMIN_SECRET:
-        admin_users.add(update.effective_user.id)
-        await update.message.reply_text("👑 Admin bo‘ldingiz!")
-    else:
-        await update.message.reply_text("❌ Kod noto‘g‘ri")
+    async with aiohttp.ClientSession() as s:
+        async with s.get(url) as r:
+            d = await r.json()
 
-# ================== PANEL ==================
-async def panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
-        return
+    text = f"🕒 {city} 24 soat:\n\n"
 
-    await update.message.reply_text(
-        "👑 ADMIN PANEL\n\n"
-        "/users\n"
-        "/broadcast text\n"
-        "/block id\n"
-        "/unblock id\n"
-        "/send id text\n"
-        "/restart"
-    )
+    for i in d["list"][:8]:
+        time = i["dt_txt"][11:16]
+        temp = i["main"]["temp"]
+        desc = i["weather"][0]["main"]
 
-# ================== BROADCAST ==================
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
-        return
-
-    text = " ".join(context.args)
-
-    for uid in user_city:
-        await context.bot.send_message(uid, f"📢 {text}")
-
-# ================== USERS ==================
-async def users(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
-        return
-
-    text = "👥 Users:\n"
-    for uid, city in user_city.items():
-        text += f"{uid} → {city}\n"
+        text += f"{time} — {temp}°C ({desc})\n"
 
     await update.message.reply_text(text)
 
-# ================== BLOCK ==================
-async def block(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
-        return
+# ================== YOMG'IR ==================
+async def rain_check(context):
+    for uid, city in user_city.items():
 
-    uid = int(context.args[0])
-    blocked_users.add(uid)
+        url = f"http://api.openweathermap.org/data/2.5/forecast?q={city},UZ&appid={API_KEY}&units=metric"
 
-    await update.message.reply_text("⛔ Block")
+        async with aiohttp.ClientSession() as s:
+            async with s.get(url) as r:
+                d = await r.json()
 
-# ================== UNBLOCK ==================
-async def unblock(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
-        return
+        for i in d["list"][:5]:
+            if "rain" in i["weather"][0]["main"].lower():
+                await context.bot.send_message(
+                    uid,
+                    f"⚠️ {city} da yomg‘ir bo‘lishi mumkin!"
+                )
+                break
 
-    uid = int(context.args[0])
-    blocked_users.discard(uid)
+# ================== DAILY ==================
+async def daily(context):
 
-    await update.message.reply_text("🔓 Unblock")
+    for uid, city in user_city.items():
+        temp, desc, emoji = await get_weather(city)
 
-# ================== SEND ==================
-async def send(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
-        return
-
-    uid = int(context.args[0])
-    text = " ".join(context.args[1:])
-
-    await context.bot.send_message(uid, text)
-
-# ================== RESTART ==================
-async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
-        return
-
-    await update.message.reply_text("♻️ Restart")
-    os.execv("python", ["python"] + ["main.py"])
-
-# ================== TEXT ==================
-async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-
-    if uid in blocked_users:
-        return
-
-    if uid not in user_city:
-        user_city[uid] = update.message.text
-        await update.message.reply_text("📍 Shahar saqlandi")
+        await context.bot.send_message(
+            uid,
+            f"🌅 Kunlik\n📍 {city}\n{emoji} {temp}°C\n{desc}"
+        )
 
 # ================== MAIN ==================
 def main():
+
     app = ApplicationBuilder().token(TOKEN).build()
 
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(daily, "cron", hour=8)
+    scheduler.add_job(rain_check, "interval", hours=6)
+    scheduler.start()
+
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("code", admin_code))
-    app.add_handler(CommandHandler("panel", panel))
-
-    app.add_handler(CommandHandler("users", users))
-    app.add_handler(CommandHandler("broadcast", broadcast))
-    app.add_handler(CommandHandler("block", block))
-    app.add_handler(CommandHandler("unblock", unblock))
-    app.add_handler(CommandHandler("send", send))
-    app.add_handler(CommandHandler("restart", restart))
-
-    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(CommandHandler("forecast", forecast))
+    app.add_handler(CommandHandler("adminpanel", admin_panel))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
 
-    print("🤖 Bot ishlayapti...")
+    print("🔥 ULTRA BOT RUNNING")
     app.run_polling()
 
 if __name__ == "__main__":
