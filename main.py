@@ -1,7 +1,11 @@
 import logging
 import aiohttp
+import matplotlib
+matplotlib.use('Agg')
+
 import matplotlib.pyplot as plt
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
 from telegram import ReplyKeyboardMarkup, Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -31,9 +35,16 @@ user_city = {}
 
 # ===== START =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (
+        "👋 Assalomu alaykum!\n\n"
+        "🤖 Bu bot sizga aniq ob-havo ma’lumotlarini beradi.\n\n"
+        "📍 Viloyatni tanlang:"
+    )
+
     keyboard = [[r] for r in regions.keys()]
+
     await update.message.reply_text(
-        "Viloyatni tanlang:",
+        text,
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
 
@@ -43,51 +54,74 @@ async def get_json(url):
         async with session.get(url) as resp:
             return await resp.json()
 
-# ===== HOZIRGI =====
+# ===== OB-HAVO IZOH =====
+def weather_text(desc):
+    desc = desc.lower()
+    if "clear" in desc:
+        return "☀️ ochiq"
+    elif "cloud" in desc:
+        return "☁️ bulutli"
+    elif "rain" in desc:
+        return "🌧 yomg‘irli"
+    elif "snow" in desc:
+        return "❄️ qorli"
+    elif "thunder" in desc:
+        return "⛈ momaqaldiroqli"
+    else:
+        return desc
+
+# ===== HOZIRGI OB-HAVO =====
 async def current_weather(update, context):
     city = user_city.get(update.effective_user.id)
-    if not city:
-        return await update.message.reply_text("Avval shahar tanlang!")
 
     url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={API_KEY}&units=metric&lang=uz"
     data = await get_json(url)
 
     temp = data["main"]["temp"]
-    desc = data["weather"][0]["description"]
+    desc = data["weather"][0]["main"]
 
-    await update.message.reply_text(f"{city}\n🌡 {temp}°C\n☁️ {desc}")
+    await update.message.reply_text(
+        f"📍 {city}\n🌡 Harorat: {temp}°C\n☁️ Holat: {weather_text(desc)}"
+    )
 
-# ===== 24 SOAT =====
+# ===== 24 SOATLIK =====
 async def forecast_24(update, context):
     city = user_city.get(update.effective_user.id)
-    url = f"http://api.openweathermap.org/data/2.5/forecast?q={city}&appid={API_KEY}&units=metric&lang=uz"
 
+    url = f"http://api.openweathermap.org/data/2.5/forecast?q={city}&appid={API_KEY}&units=metric&lang=uz"
     data = await get_json(url)
 
-    msg = f"{city} 24 soatlik:\n"
+    msg = f"🕒 {city} 24 soatlik ob-havo:\n\n"
+
     for i in range(8):
-        t = data["list"][i]["main"]["temp"]
-        time = data["list"][i]["dt_txt"]
-        msg += f"{time} → {t}°C\n"
+        item = data["list"][i]
+        time = item["dt_txt"][11:16]
+        temp = item["main"]["temp"]
+        desc = item["weather"][0]["main"]
+
+        msg += f"⏰ {time} — {temp}°C ({weather_text(desc)})\n"
 
     await update.message.reply_text(msg)
 
 # ===== GRAFIK =====
 async def graph_5(update, context):
     city = user_city.get(update.effective_user.id)
-    url = f"http://api.openweathermap.org/data/2.5/forecast?q={city}&appid={API_KEY}&units=metric"
 
+    url = f"http://api.openweathermap.org/data/2.5/forecast?q={city}&appid={API_KEY}&units=metric"
     data = await get_json(url)
 
-    temps, dates = [], []
+    temps = []
+    dates = []
 
     for i in range(0, 40, 8):
         temps.append(data["list"][i]["main"]["temp"])
         dates.append(data["list"][i]["dt_txt"][:10])
 
     plt.figure()
-    plt.plot(dates, temps)
+    plt.plot(dates, temps, marker="o")
     plt.title(f"{city} 5 kunlik ob-havo")
+    plt.grid()
+
     plt.savefig("weather.png")
 
     await update.message.reply_photo(photo=open("weather.png", "rb"))
@@ -118,7 +152,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
 
             return await update.message.reply_text(
-                f"{text} tanlandi!",
+                f"📍 {text} tanlandi!",
                 reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
             )
 
@@ -135,45 +169,18 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "🔄 Shaharni almashtirish":
         return await start(update, context)
 
-# ===== AVTO YUBORISH =====
-async def daily_weather(app):
-    for user_id, city in user_city.items():
-        url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={API_KEY}&units=metric"
-        data = await get_json(url)
-
-        temp = data["main"]["temp"]
-        desc = data["weather"][0]["description"]
-
-        await app.bot.send_message(
-            chat_id=user_id,
-            text=f"🌅 Bugungi ob-havo ({city})\n🌡 {temp}°C\n☁️ {desc}"
-        )
-
-# ===== YOMG‘IR ALERT =====
-async def rain_alert(app):
-    for user_id, city in user_city.items():
-        url = f"http://api.openweathermap.org/data/2.5/forecast?q={city}&appid={API_KEY}&units=metric"
-        data = await get_json(url)
-
-        for item in data["list"][:8]:
-            if "rain" in item:
-                await app.bot.send_message(
-                    chat_id=user_id,
-                    text=f"🌧 DIQQAT! {city} da yomg‘ir kutilmoqda!"
-                )
-                break
-
 # ===== MAIN =====
-if __name__ == "__main__":
+async def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(lambda: daily_weather(app), "cron", hour=8, minute=0)
-    scheduler.add_job(lambda: rain_alert(app), "interval", hours=3)
-    scheduler.start()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT, handle))
 
-    print("🔥 BOT ISHGA TUSHDI")
-    app.run_polling()
+    print("🔥 BOT ISHLADI")
+    await app.run_polling()
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
