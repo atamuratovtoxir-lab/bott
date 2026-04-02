@@ -4,8 +4,6 @@ import matplotlib
 matplotlib.use('Agg')
 
 import matplotlib.pyplot as plt
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
 from telegram import ReplyKeyboardMarkup, Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -37,7 +35,7 @@ user_city = {}
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "👋 Assalomu alaykum!\n\n"
-        "🤖 Bu bot sizga aniq ob-havo ma’lumotlarini beradi.\n\n"
+        "🤖 Ob-havo botga xush kelibsiz!\n\n"
         "📍 Viloyatni tanlang:"
     )
 
@@ -54,7 +52,7 @@ async def get_json(url):
         async with session.get(url) as resp:
             return await resp.json()
 
-# ===== OB-HAVO IZOH =====
+# ===== OB-HAVO TEXT =====
 def weather_text(desc):
     desc = desc.lower()
     if "clear" in desc:
@@ -67,12 +65,14 @@ def weather_text(desc):
         return "❄️ qorli"
     elif "thunder" in desc:
         return "⛈ momaqaldiroqli"
-    else:
-        return desc
+    return desc
 
-# ===== HOZIRGI OB-HAVO =====
+# ===== HOZIRGI =====
 async def current_weather(update, context):
     city = user_city.get(update.effective_user.id)
+
+    if not city:
+        return
 
     url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={API_KEY}&units=metric&lang=uz"
     data = await get_json(url)
@@ -84,9 +84,11 @@ async def current_weather(update, context):
         f"📍 {city}\n🌡 Harorat: {temp}°C\n☁️ Holat: {weather_text(desc)}"
     )
 
-# ===== 24 SOATLIK =====
+# ===== 24 SOAT =====
 async def forecast_24(update, context):
     city = user_city.get(update.effective_user.id)
+    if not city:
+        return
 
     url = f"http://api.openweathermap.org/data/2.5/forecast?q={city}&appid={API_KEY}&units=metric&lang=uz"
     data = await get_json(url)
@@ -99,13 +101,15 @@ async def forecast_24(update, context):
         temp = item["main"]["temp"]
         desc = item["weather"][0]["main"]
 
-        msg += f"⏰ {time} — {temp}°C ({weather_text(desc)})\n"
+        msg += f"{time} — {temp}°C ({weather_text(desc)})\n"
 
     await update.message.reply_text(msg)
 
 # ===== GRAFIK =====
 async def graph_5(update, context):
     city = user_city.get(update.effective_user.id)
+    if not city:
+        return
 
     url = f"http://api.openweathermap.org/data/2.5/forecast?q={city}&appid={API_KEY}&units=metric"
     data = await get_json(url)
@@ -131,15 +135,15 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
 
-    # viloyat
     if text in regions:
         keyboard = [[c] for c in regions[text]]
-        return await update.message.reply_text(
+
+        await update.message.reply_text(
             "Shaharni tanlang:",
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         )
+        return
 
-    # shahar
     for cities in regions.values():
         if text in cities:
             user_city[user_id] = text
@@ -151,36 +155,33 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ["🔄 Shaharni almashtirish"]
             ]
 
-            return await update.message.reply_text(
+            await update.message.reply_text(
                 f"📍 {text} tanlandi!",
                 reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
             )
+            return
 
-    # tugmalar
     if text == "🌤 Hozirgi ob-havo":
-        return await current_weather(update, context)
+        await current_weather(update, context)
 
-    if text == "🕒 24 soatlik ob-havo":
-        return await forecast_24(update, context)
+    elif text == "🕒 24 soatlik ob-havo":
+        await forecast_24(update, context)
 
-    if text == "📊 5 kunlik grafik":
-        return await graph_5(update, context)
+    elif text == "📊 5 kunlik grafik":
+        await graph_5(update, context)
 
-    if text == "🔄 Shaharni almashtirish":
-        return await start(update, context)
+    elif text == "🔄 Shaharni almashtirish":
+        await start(update, context)
 
 # ===== MAIN =====
-async def main():
+def main():
     app = ApplicationBuilder().token(TOKEN).build()
-
-    scheduler = AsyncIOScheduler()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT, handle))
 
     print("🔥 BOT ISHLADI")
-    await app.run_polling()
+    app.run_polling()
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    main()
