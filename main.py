@@ -5,7 +5,8 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
+import pytz
 
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
@@ -16,6 +17,8 @@ API_KEY = "0ebc0669786259cc3183b9f7d9d33ecd"
 logging.basicConfig(level=logging.INFO)
 
 user_city = {}
+
+uzb_tz = pytz.timezone("Asia/Tashkent")
 
 # 🌍 VILOYATLAR
 regions = {
@@ -33,7 +36,7 @@ regions = {
     "Qoraqalpog‘iston": ["Nukus", "Taxiatosh", "Chimboy", "Beruniy", "Mo‘ynoq"]
 }
 
-# 📍 KORDINATALAR (KO‘P SHAHAR)
+# 📍 KORDINATALAR (qisqartirmadim)
 city_coords = {
     "Toshkent": (41.2995, 69.2401),
     "Chirchiq": (41.4689, 69.5822),
@@ -113,10 +116,10 @@ async def get_weather(lat, lon):
                 return None
             return await resp.json()
 
-# ⏰ AUTO SYSTEM
+# ⏰ AUTO
 async def auto_task(app):
     while True:
-        now = datetime.now()
+        now = datetime.now(uzb_tz)
 
         if now.hour == 8 and now.minute == 0:
             for user_id, city in user_city.items():
@@ -125,12 +128,10 @@ async def auto_task(app):
                     data = await get_weather(lat, lon)
 
                     temp = data["list"][0]["main"]["temp"]
-                    rain = data["list"][0].get("pop", 0) * 100
+                    wind = data["list"][0]["wind"]["speed"]
+                    desc = data["list"][0]["weather"][0]["description"]
 
-                    text = f"🌤 {city}\n🌡 {temp}°C\n🌧 {rain:.0f}%"
-
-                    if rain > 60:
-                        text += "\n⚠️ Yomg‘ir bo‘lishi mumkin!"
+                    text = f"🌤 {city}\n🌡 {temp}°C\n🌬 {wind} m/s\n☁️ {desc}"
 
                     await app.bot.send_message(user_id, text)
                 except:
@@ -162,8 +163,12 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lat, lon = city_coords[city]
         data = await get_weather(lat, lon)
 
-        temp = data["list"][0]["main"]["temp"]
-        await update.message.reply_text(f"🌡 {temp}°C")
+        d = data["list"][0]
+        temp = d["main"]["temp"]
+        wind = d["wind"]["speed"]
+        desc = d["weather"][0]["description"]
+
+        await update.message.reply_text(f"🌡 {temp}°C\n🌬 {wind} m/s\n☁️ {desc}")
 
     elif text == "📊 24 soat":
         city = user_city[user_id]
@@ -173,7 +178,13 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = ""
         for i in range(8):
             d = data["list"][i]
-            msg += f"{d['dt_txt'][11:16]} - {d['main']['temp']}°C\n"
+
+            time = d["dt_txt"][11:16]
+            temp = d["main"]["temp"]
+            wind = d["wind"]["speed"]
+            desc = d["weather"][0]["description"]
+
+            msg += f"{time} 🌡{temp}°C 🌬{wind}m/s ☁️{desc}\n"
 
         await update.message.reply_text(msg)
 
@@ -205,7 +216,7 @@ def main():
     loop = asyncio.get_event_loop()
     loop.create_task(auto_task(app))
 
-    print("🔥 MEGA BOT READY")
+    print("🔥 BOT READY")
     app.run_polling()
 
 if __name__ == "__main__":
