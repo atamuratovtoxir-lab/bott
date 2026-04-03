@@ -1,196 +1,211 @@
 import aiohttp
-from datetime import datetime, timedelta
-from telegram import (
-    Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
-)
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler,
-    CallbackQueryHandler, ContextTypes, filters
-)
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+import asyncio
+import logging
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import os
+from datetime import datetime
+
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
 TOKEN = "8750583800:AAESA_ESsTR3iX3yJIgt_AzeRASSe1L441Q"
 API_KEY = "0ebc0669786259cc3183b9f7d9d33ecd"
 
-ADMIN_PASSWORD = "54776+;5+-'zruobtyivvhuj"
+logging.basicConfig(level=logging.INFO)
 
-admin_users = set()
 user_city = {}
 
-# ================== REGION ==================
+# 🌍 VILOYATLAR
 regions = {
-    "Toshkent": ["Toshkent", "Chirchiq", "Angren"],
-    "Samarqand": ["Samarqand", "Urgut", "Kattaqo‘rg‘on"],
-    "Xorazm": ["Urgench", "Xiva", "Hazorasp"],
-    "Buxoro": ["Buxoro", "G‘ijduvon", "Kogon"],
-    "Farg‘ona": ["Farg‘ona", "Marg‘ilon", "Qo‘qon"],
-    "Andijon": ["Andijon", "Asaka", "Xonobod"],
-    "Namangan": ["Namangan", "Pop", "Chortoq"],
-    "Qashqadaryo": ["Qarshi", "Shahrisabz", "Koson"],
-    "Surxondaryo": ["Termiz", "Denov", "Boysun"],
-    "Jizzax": ["Jizzax", "Zomin", "G‘allaorol"],
-    "Navoiy": ["Navoiy", "Zarafshon", "Karmana"],
-    "Qoraqalpog‘iston": ["Nukus", "To‘rtko‘l", "Chimboy"]
+    "Toshkent": ["Toshkent", "Chirchiq", "Angren", "Olmaliq", "Bekobod", "Yangiyo‘l"],
+    "Samarqand": ["Samarqand", "Urgut", "Kattaqo‘rg‘on", "Jomboy", "Pastdarg‘om"],
+    "Buxoro": ["Buxoro", "G‘ijduvon", "Kogon", "Vobkent", "Olot"],
+    "Andijon": ["Andijon", "Asaka", "Shahrixon", "Xonobod"],
+    "Farg‘ona": ["Farg‘ona", "Qo‘qon", "Marg‘ilon", "Quva", "Rishton"],
+    "Namangan": ["Namangan", "Chortoq", "Kosonsoy", "Pop"],
+    "Xorazm": ["Urganch", "Xiva", "Xonqa", "Shovot", "Gurlan"],
+    "Qashqadaryo": ["Qarshi", "Shahrisabz", "Kitob", "G‘uzor"],
+    "Surxondaryo": ["Termiz", "Denov", "Boysun", "Sherobod"],
+    "Jizzax": ["Jizzax", "Zomin", "G‘allaorol", "Forish"],
+    "Navoiy": ["Navoiy", "Zarafshon", "Karmana", "Uchquduq"],
+    "Qoraqalpog‘iston": ["Nukus", "Taxiatosh", "Chimboy", "Beruniy", "Mo‘ynoq"]
 }
 
-# ================== TIME ==================
-def uz_time():
-    return (datetime.utcnow() + timedelta(hours=5)).strftime("%d.%m.%Y %H:%M")
+# 📍 KORDINATALAR (KO‘P SHAHAR)
+city_coords = {
+    "Toshkent": (41.2995, 69.2401),
+    "Chirchiq": (41.4689, 69.5822),
+    "Angren": (41.0167, 70.1436),
+    "Olmaliq": (40.8447, 69.5970),
+    "Bekobod": (40.2208, 69.2697),
+    "Yangiyo‘l": (41.1122, 69.0460),
 
-# ================== WEATHER ==================
-async def get_weather(city):
-    url = f"http://api.openweathermap.org/data/2.5/weather?q={city},UZ&appid={API_KEY}&units=metric&lang=uz"
+    "Samarqand": (39.6547, 66.9750),
+    "Urgut": (39.4022, 67.2433),
+    "Kattaqo‘rg‘on": (39.9000, 66.2667),
+    "Jomboy": (39.7000, 67.0900),
+    "Pastdarg‘om": (39.6500, 66.8000),
 
-    async with aiohttp.ClientSession() as s:
-        async with s.get(url) as r:
-            d = await r.json()
+    "Buxoro": (39.7747, 64.4286),
+    "G‘ijduvon": (40.1000, 64.6833),
+    "Kogon": (39.7228, 64.5519),
+    "Vobkent": (40.0200, 64.5150),
+    "Olot": (39.3800, 63.9200),
 
-    temp = d["main"]["temp"]
-    desc = d["weather"][0]["description"]
+    "Andijon": (40.7821, 72.3442),
+    "Asaka": (40.6500, 72.2333),
+    "Shahrixon": (40.7167, 72.0500),
+    "Xonobod": (40.9000, 72.1000),
 
-    if "rain" in desc:
-        emoji = "🌧"
-    elif "cloud" in desc:
-        emoji = "☁️"
-    else:
-        emoji = "☀️"
+    "Farg‘ona": (40.3842, 71.7843),
+    "Qo‘qon": (40.5286, 70.9425),
+    "Marg‘ilon": (40.4722, 71.7247),
+    "Quva": (40.5200, 72.0700),
+    "Rishton": (40.3600, 71.2100),
 
-    return temp, desc, emoji
+    "Namangan": (41.0058, 71.6436),
+    "Chortoq": (41.0333, 71.8333),
+    "Kosonsoy": (41.2500, 71.5500),
+    "Pop": (41.0900, 71.1050),
 
-# ================== START ==================
+    "Urganch": (41.5500, 60.6333),
+    "Xiva": (41.3783, 60.3633),
+    "Xonqa": (41.4500, 60.7833),
+    "Shovot": (41.6500, 60.3000),
+    "Gurlan": (41.8400, 60.3900),
+
+    "Qarshi": (38.8606, 65.7891),
+    "Shahrisabz": (39.0572, 66.8342),
+    "Kitob": (39.0842, 66.8333),
+    "G‘uzor": (38.6200, 65.8200),
+
+    "Termiz": (37.2242, 67.2783),
+    "Denov": (38.2667, 67.9000),
+    "Boysun": (38.2000, 67.2000),
+    "Sherobod": (37.6600, 67.0000),
+
+    "Jizzax": (40.1158, 67.8422),
+    "Zomin": (39.9417, 68.3958),
+    "G‘allaorol": (40.0667, 67.5833),
+    "Forish": (40.3833, 67.2833),
+
+    "Navoiy": (40.0844, 65.3792),
+    "Zarafshon": (41.5675, 64.2083),
+    "Karmana": (40.0833, 65.3667),
+    "Uchquduq": (42.1500, 63.5500),
+
+    "Nukus": (42.4531, 59.6103),
+    "Taxiatosh": (42.0833, 59.2000),
+    "Chimboy": (42.9500, 59.0667),
+    "Beruniy": (41.6900, 60.7500),
+    "Mo‘ynoq": (43.8000, 59.0200)
+}
+
+# 🌐 API
+async def get_weather(lat, lon):
+    url = f"https://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={API_KEY}&units=metric"
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                return None
+            return await resp.json()
+
+# ⏰ AUTO SYSTEM
+async def auto_task(app):
+    while True:
+        now = datetime.now()
+
+        if now.hour == 8 and now.minute == 0:
+            for user_id, city in user_city.items():
+                try:
+                    lat, lon = city_coords[city]
+                    data = await get_weather(lat, lon)
+
+                    temp = data["list"][0]["main"]["temp"]
+                    rain = data["list"][0].get("pop", 0) * 100
+
+                    text = f"🌤 {city}\n🌡 {temp}°C\n🌧 {rain:.0f}%"
+
+                    if rain > 60:
+                        text += "\n⚠️ Yomg‘ir bo‘lishi mumkin!"
+
+                    await app.bot.send_message(user_id, text)
+                except:
+                    pass
+
+        await asyncio.sleep(60)
+
+# START
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [[r] for r in regions.keys()]
+    await update.message.reply_text("🏙 Viloyat tanlang:", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
 
-    keyboard = [[r] for r in regions]
-
-    await update.message.reply_text(
-        "🤖 ULTRA WEATHER BOT\n\n📍 Viloyatni tanlang:",
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    )
-
-# ================== ADMIN PANEL ==================
-async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🔐 Parolni kiriting:")
-
-# ================== HANDLE ==================
+# HANDLER
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
     text = update.message.text
+    user_id = update.effective_user.id
 
-    # ADMIN LOGIN
-    if text == ADMIN_PASSWORD:
-        admin_users.add(uid)
-        await update.message.reply_text("👑 Admin panelga kirdingiz!")
-        return
-
-    # ADMIN COMMAND
-    if uid in admin_users and text.startswith("/broadcast"):
-        msg = text.replace("/broadcast", "").strip()
-
-        for u in user_city.keys():
-            await context.bot.send_message(u, f"📢 Admin: {msg}")
-
-        return
-
-    # REGION
     if text in regions:
         keyboard = [[c] for c in regions[text]]
+        await update.message.reply_text("🏙 Shahar:", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
 
-        await update.message.reply_text(
-            "🏙 Shaharni tanlang:",
-            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-        )
-        return
+    elif text in city_coords:
+        user_city[user_id] = text
+        keyboard = [["🌤 Hozir"], ["📊 24 soat"], ["📅 5 kun"], ["⬅️ Orqaga"]]
+        await update.message.reply_text(f"✅ {text}", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
 
-    # CITY
-    for cities in regions.values():
-        if text in cities:
-            user_city[uid] = text
+    elif text == "🌤 Hozir":
+        city = user_city[user_id]
+        lat, lon = city_coords[city]
+        data = await get_weather(lat, lon)
 
-            temp, desc, emoji = await get_weather(text)
+        temp = data["list"][0]["main"]["temp"]
+        await update.message.reply_text(f"🌡 {temp}°C")
 
-            await update.message.reply_text(
-f"""
-📍 {text}
-🕒 {uz_time()}
+    elif text == "📊 24 soat":
+        city = user_city[user_id]
+        lat, lon = city_coords[city]
+        data = await get_weather(lat, lon)
 
-🌤 Ob-havo:
-🌡 {temp}°C
-{emoji} {desc}
-"""
-            )
-            return
+        msg = ""
+        for i in range(8):
+            d = data["list"][i]
+            msg += f"{d['dt_txt'][11:16]} - {d['main']['temp']}°C\n"
 
-# ================== FORECAST ==================
-async def forecast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await update.message.reply_text(msg)
 
-    uid = update.effective_user.id
-    city = user_city.get(uid)
+    elif text == "📅 5 kun":
+        city = user_city[user_id]
+        lat, lon = city_coords[city]
+        data = await get_weather(lat, lon)
 
-    if not city:
-        return
+        temps = [x["main"]["temp"] for x in data["list"][:10]]
 
-    url = f"http://api.openweathermap.org/data/2.5/forecast?q={city},UZ&appid={API_KEY}&units=metric"
+        plt.plot(temps)
+        file = f"{city}.png"
+        plt.savefig(file)
+        plt.close()
 
-    async with aiohttp.ClientSession() as s:
-        async with s.get(url) as r:
-            d = await r.json()
+        await update.message.reply_photo(photo=open(file, "rb"))
+        os.remove(file)
 
-    text = f"🕒 {city} 24 soat:\n\n"
+    elif text == "⬅️ Orqaga":
+        await start(update, context)
 
-    for i in d["list"][:8]:
-        time = i["dt_txt"][11:16]
-        temp = i["main"]["temp"]
-        desc = i["weather"][0]["main"]
-
-        text += f"{time} — {temp}°C ({desc})\n"
-
-    await update.message.reply_text(text)
-
-# ================== YOMG'IR ==================
-async def rain_check(context):
-    for uid, city in user_city.items():
-
-        url = f"http://api.openweathermap.org/data/2.5/forecast?q={city},UZ&appid={API_KEY}&units=metric"
-
-        async with aiohttp.ClientSession() as s:
-            async with s.get(url) as r:
-                d = await r.json()
-
-        for i in d["list"][:5]:
-            if "rain" in i["weather"][0]["main"].lower():
-                await context.bot.send_message(
-                    uid,
-                    f"⚠️ {city} da yomg‘ir bo‘lishi mumkin!"
-                )
-                break
-
-# ================== DAILY ==================
-async def daily(context):
-
-    for uid, city in user_city.items():
-        temp, desc, emoji = await get_weather(city)
-
-        await context.bot.send_message(
-            uid,
-            f"🌅 Kunlik\n📍 {city}\n{emoji} {temp}°C\n{desc}"
-        )
-
-# ================== MAIN ==================
+# MAIN
 def main():
-
     app = ApplicationBuilder().token(TOKEN).build()
 
-    scheduler = AsyncIOScheduler()
-    scheduler.add_job(daily, "cron", hour=8)
-    scheduler.add_job(rain_check, "interval", hours=6)
-    scheduler.start()
-
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("forecast", forecast))
-    app.add_handler(CommandHandler("adminpanel", admin_panel))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
+    app.add_handler(MessageHandler(filters.TEXT, handle))
 
-    print("🔥 ULTRA BOT RUNNING")
+    loop = asyncio.get_event_loop()
+    loop.create_task(auto_task(app))
+
+    print("🔥 MEGA BOT READY")
     app.run_polling()
 
 if __name__ == "__main__":
